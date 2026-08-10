@@ -317,7 +317,12 @@ function LoadingScreen(){
   );
 }
 
-const TURNSTILE_SITE_KEY="0x4AAAAAAD7cl8ffY5GysVNZ";
+const PROD_TURNSTILE_SITE_KEY="0x4AAAAAAD7cl8ffY5GysVNZ";
+// Chave pública de teste do Cloudflare ("sempre passa") — só para localhost/127.0.0.1,
+// nunca usada em produção. Evita depender de liberar domínios de dev no Turnstile.
+const DEV_TURNSTILE_SITE_KEY="1x00000000000000000000AA";
+const _isDevHost=typeof window!=="undefined"&&["localhost","127.0.0.1"].includes(window.location.hostname);
+const TURNSTILE_SITE_KEY=_isDevHost?DEV_TURNSTILE_SITE_KEY:PROD_TURNSTILE_SITE_KEY;
 function LoginScreen({onLoginSuccess}){
   const[email,setEmail]=useState("");
   const[password,setPassword]=useState("");
