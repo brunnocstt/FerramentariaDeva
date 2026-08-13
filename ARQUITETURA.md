@@ -115,6 +115,7 @@ Reset de senha usa o mesmo padrão definitivo do app de referência: token custo
 | Tabela | Descrição | RLS |
 |---|---|---|
 | `filiais` | As 6 filiais com oficina (Betim, Juiz de Fora, Montes Claros, Pouso Alegre, Divinópolis, Belo Horizonte) | ✅ |
+| `categorias_ferramenta` | Categorias de ferramenta (editável em Configurações), cada uma com flag `requer_afericao` | ✅ |
 | `profiles` | Perfil de cada usuário, vinculado a `auth.users` | ✅ |
 | `ferramentas` | Cadastro central de ferramentas | ✅ |
 | `movimentacoes` | Log **append-only** de toda ação sobre uma ferramenta | ✅ |
@@ -129,11 +130,14 @@ Reset de senha usa o mesmo padrão definitivo do app de referência: token custo
 | Coluna | Tipo | Observação |
 |---|---|---|
 | `codigo` | text | Único por filial |
+| `categoria_id` | FK categorias_ferramenta | Determina se a ferramenta pede/mostra aferição (via `requer_afericao` da categoria) |
 | `status` | enum | `disponivel`\|`com_colaborador`\|`em_afericao`\|`em_conserto`\|`extraviada`\|`baixada` — **só mutável por trigger** |
 | `colaborador_atual_id` | FK profiles | Quem está com a ferramenta — **só mutável por trigger** |
-| `data_ultima_afericao`, `data_proxima_afericao`, `data_saida_afericao`, `data_retorno_afericao` | date | **Só mutáveis por trigger** |
+| `data_ultima_afericao`, `data_proxima_afericao`, `data_saida_afericao`, `data_retorno_afericao` | date | **Só mutáveis por trigger**; só fazem sentido pra ferramentas de categoria com `requer_afericao=true` |
 
-Reforço extra de defesa: `REVOKE UPDATE` + `GRANT UPDATE (nome, codigo, categoria, observacoes)` — as colunas operacionais não têm privilégio de UPDATE concedido ao papel `authenticated` em nível de coluna, então mesmo um bug de RLS não abriria brecha.
+Reforço extra de defesa: `REVOKE UPDATE` + `GRANT UPDATE (nome, codigo, categoria_id, observacoes)` — as colunas operacionais não têm privilégio de UPDATE concedido ao papel `authenticated` em nível de coluna, então mesmo um bug de RLS não abriria brecha.
+
+**Categoria controla a UI de aferição**: a tela de detalhe da ferramenta e o cadastro só mostram/pedem os campos de aferição (datas) e a ação "Enviar p/ Aferição" quando `categorias_ferramenta.requer_afericao` da categoria escolhida é `true`. Categorias seed: Ferramentas de medição, Equipamentos de elevação e Equipamentos de diagnóstico exigem aferição; as demais (manuais, pneumáticas, elétricas, especiais do fabricante, solda) não.
 
 ### Funções auxiliares de RLS (schema `private`)
 
