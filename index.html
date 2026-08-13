@@ -760,7 +760,7 @@ function DashboardView({profile,filiais}){
     let cancelled=false;
     async function load(){
       setLoading(true);
-      let q=supabase.from("ferramentas").select("status,data_proxima_afericao,ativo");
+      let q=supabase.from("ferramentas_unidade").select("status,data_proxima_afericao,ativo");
       if(profile.userType!=="admin_geral")q=q.eq("filial_id",profile.filialId);
       const{data,error}=await q;
       if(cancelled)return;
@@ -811,31 +811,78 @@ function DashboardView({profile,filiais}){
 /* ══════════════════════════════════════════════════════════════
    FERRAMENTAS
    ══════════════════════════════════════════════════════════════ */
-function ModalNovaFerramenta({onClose,onSaved,filiais,categorias,profile,editando}){
-  const[codigo,setCodigo]=useState(editando?.codigo||"");
-  const[nome,setNome]=useState(editando?.nome||"");
-  const[categoriaId,setCategoriaId]=useState(editando?.categoria_id||"");
-  const[filialId,setFilialId]=useState(editando?.filial_id||(profile.userType==="admin_area"?profile.filialId:""));
-  const[dataProximaAfericao,setDataProximaAfericao]=useState(editando?.data_proxima_afericao||"");
-  const[observacoes,setObservacoes]=useState(editando?.observacoes||"");
+// Cadastro de ferramenta = 2 passos num modal só:
+// 1) escolher um TIPO já existente no catálogo, ou (só admin_geral) cadastrar um tipo novo;
+// 2) conforme a categoria do tipo escolhido, pedir OU um código de unidade individual
+//    (ferramentas_unidade) OU uma quantidade a somar ao estoque da filial (estoque_pool).
+function ModalNovaFerramenta({onClose,onSaved,filiais,categorias,catalogos,profile,editandoUnidade}){
+  const isAdminGeral=profile.userType==="admin_geral";
+  const[modoNovoTipo,setModoNovoTipo]=useState(false);
+  const[catalogoId,setCatalogoId]=useState(editandoUnidade?.catalogo_id||"");
+  const[novoTipoNome,setNovoTipoNome]=useState("");
+  const[novoTipoCategoriaId,setNovoTipoCategoriaId]=useState("");
+  const[codigo,setCodigo]=useState(editandoUnidade?.codigo||"");
+  const[quantidade,setQuantidade]=useState("");
+  const[filialId,setFilialId]=useState(editandoUnidade?.filial_id||(profile.userType==="admin_area"?profile.filialId:""));
+  const[dataProximaAfericao,setDataProximaAfericao]=useState(editandoUnidade?.data_proxima_afericao||"");
+  const[observacoes,setObservacoes]=useState(editandoUnidade?.observacoes||"");
   const[loading,setLoading]=useState(false);
   const[error,setError]=useState("");
 
-  const categoriaSelecionada=categorias.find(c=>c.id===categoriaId);
-  const requerAfericao=!!categoriaSelecionada?.requer_afericao;
+  const catalogoAtual=editandoUnidade
+    ? catalogos.find(c=>c.id===editandoUnidade.catalogo_id)
+    : catalogos.find(c=>c.id===catalogoId);
+  const categoriaAtual=modoNovoTipo
+    ? categorias.find(c=>c.id===novoTipoCategoriaId)
+    : categorias.find(c=>c.id===catalogoAtual?.categoria_id);
+  const requerAfericao=!!categoriaAtual?.requer_afericao;
+  const controleIndividual=categoriaAtual?.controle_individual!==false; // default true se ainda não sabemos
 
   async function salvar(){
-    if(!codigo||!nome||!filialId){setError("Preencha código, nome e filial.");return;}
-    setLoading(true);setError("");
-    if(editando){
-      const{error:err}=await supabase.from("ferramentas").update({codigo,nome,categoria_id:categoriaId||null,observacoes:observacoes||null}).eq("id",editando.id);
+    setError("");
+    if(editandoUnidade){
+      if(!codigo){setError("Preencha o código.");return;}
+      setLoading(true);
+      const{error:err}=await supabase.from("ferramentas_unidade").update({codigo,observacoes:observacoes||null}).eq("id",editandoUnidade.id);
+      setLoading(false);
+      if(err){setError(traduzErro(err));return;}
+      onSaved();
+      return;
+    }
+
+    let finalCatalogoId=catalogoId;
+    if(modoNovoTipo){
+      if(!novoTipoNome.trim()){setError("Preencha o nome do novo tipo de ferramenta.");return;}
+      setLoading(true);
+      const{data,error:err}=await supabase.from("ferramentas_catalogo")
+        .insert({nome:novoTipoNome.trim(),categoria_id:novoTipoCategoriaId||null}).select().single();
+      if(err){setLoading(false);setError(traduzErro(err));return;}
+      finalCatalogoId=data.id;
+    }
+    if(!finalCatalogoId){setError("Selecione o tipo de ferramenta.");return;}
+    if(!filialId){setError("Selecione a filial.");return;}
+
+    if(controleIndividual){
+      if(!codigo){setError("Preencha o código da unidade.");return;}
+      setLoading(true);
+      const{error:err}=await supabase.from("ferramentas_unidade").insert({
+        catalogo_id:finalCatalogoId,filial_id:filialId,codigo,
+        data_proxima_afericao:requerAfericao?(dataProximaAfericao||null):null,observacoes:observacoes||null,
+      });
       setLoading(false);
       if(err){setError(traduzErro(err));return;}
     }else{
-      const{error:err}=await supabase.from("ferramentas").insert({
-        codigo,nome,categoria_id:categoriaId||null,filial_id:filialId,
-        data_proxima_afericao:requerAfericao?(dataProximaAfericao||null):null,observacoes:observacoes||null,
-      });
+      const qtd=parseInt(quantidade,10);
+      if(!qtd||qtd<=0){setError("Informe uma quantidade válida.");return;}
+      setLoading(true);
+      const{data:existente}=await supabase.from("estoque_pool").select("id,quantidade_total")
+        .eq("catalogo_id",finalCatalogoId).eq("filial_id",filialId).maybeSingle();
+      let err;
+      if(existente){
+        ({error:err}=await supabase.from("estoque_pool").update({quantidade_total:existente.quantidade_total+qtd}).eq("id",existente.id));
+      }else{
+        ({error:err}=await supabase.from("estoque_pool").insert({catalogo_id:finalCatalogoId,filial_id:filialId,quantidade_total:qtd}));
+      }
       setLoading(false);
       if(err){setError(traduzErro(err));return;}
     }
@@ -843,33 +890,66 @@ function ModalNovaFerramenta({onClose,onSaved,filiais,categorias,profile,editand
   }
 
   return(
-    <Modal title={editando?"Editar Ferramenta":"Nova Ferramenta"} onClose={onClose}
+    <Modal title={editandoUnidade?"Editar Unidade":"Nova Ferramenta"} onClose={onClose}
       footer={<>
         <BtnSecondary onClick={onClose}>Cancelar</BtnSecondary>
-        <BtnPrimary onClick={salvar} loading={loading}>{editando?"Salvar Alterações":"Cadastrar Ferramenta"}</BtnPrimary>
+        <BtnPrimary onClick={salvar} loading={loading}>{editandoUnidade?"Salvar Alterações":"Cadastrar"}</BtnPrimary>
       </>}>
       <ErrorBox>{error}</ErrorBox>
       <div style={{display:"flex",flexDirection:"column",gap:14}}>
-        <Field label="Código de identificação" required>
-          <input value={codigo} onChange={e=>setCodigo(e.target.value)} style={inputStyle} placeholder="Ex.: FER-0123"/>
-        </Field>
-        <Field label="Nome da ferramenta" required>
-          <input value={nome} onChange={e=>setNome(e.target.value)} style={inputStyle} placeholder="Ex.: Torquímetro 1/2&quot;"/>
-        </Field>
-        <Field label="Categoria" hint={categoriaId?(requerAfericao?"Essa categoria exige controle de aferição.":"Essa categoria não exige aferição."):null}>
-          <select value={categoriaId} onChange={e=>setCategoriaId(e.target.value)} style={inputStyle}>
-            <option value="">Sem categoria</option>
-            {categorias.map(c=><option key={c.id} value={c.id}>{c.nome}</option>)}
-          </select>
-        </Field>
+        {!editandoUnidade&&(modoNovoTipo?(
+          <>
+            <Field label="Nome do novo tipo de ferramenta" required>
+              <input value={novoTipoNome} onChange={e=>setNovoTipoNome(e.target.value)} style={inputStyle} placeholder="Ex.: Torquímetro 1/2&quot;"/>
+            </Field>
+            <Field label="Categoria" hint={novoTipoCategoriaId?(requerAfericao?"Essa categoria exige controle de aferição — cada unidade terá código próprio.":controleIndividual?"Cada unidade terá código próprio.":"Controlado por quantidade (sem código individual)."):null}>
+              <select value={novoTipoCategoriaId} onChange={e=>setNovoTipoCategoriaId(e.target.value)} style={inputStyle}>
+                <option value="">Sem categoria</option>
+                {categorias.map(c=><option key={c.id} value={c.id}>{c.nome}</option>)}
+              </select>
+            </Field>
+            {isAdminGeral&&<button type="button" onClick={()=>setModoNovoTipo(false)}
+              style={{border:"none",background:"none",color:BLUE,fontSize:12,fontWeight:700,cursor:"pointer",padding:0,textAlign:"left"}}>
+              ← Usar um tipo já cadastrado
+            </button>}
+          </>
+        ):(
+          <>
+            <Field label="Tipo de ferramenta" required>
+              <select value={catalogoId} onChange={e=>setCatalogoId(e.target.value)} style={inputStyle}>
+                <option value="">Selecione...</option>
+                {catalogos.map(c=><option key={c.id} value={c.id}>{c.nome}</option>)}
+              </select>
+            </Field>
+            {catalogoId&&<div style={{fontSize:12,color:"#6B7280"}}>
+              {controleIndividual?"Cada unidade terá código próprio.":"Controlado por quantidade (sem código individual)."}
+              {requerAfericao&&" Exige controle de aferição."}
+            </div>}
+            {isAdminGeral&&<button type="button" onClick={()=>setModoNovoTipo(true)}
+              style={{border:"none",background:"none",color:BLUE,fontSize:12,fontWeight:700,cursor:"pointer",padding:0,textAlign:"left"}}>
+              + Cadastrar um tipo novo
+            </button>}
+          </>
+        ))}
+
         <Field label="Filial" required>
           <select value={filialId} onChange={e=>setFilialId(e.target.value)} style={inputStyle}
-            disabled={!!editando||profile.userType==="admin_area"}>
+            disabled={!!editandoUnidade||profile.userType==="admin_area"}>
             <option value="">Selecione...</option>
             {filiais.map(f=><option key={f.id} value={f.id}>{f.nome}</option>)}
           </select>
         </Field>
-        {!editando&&requerAfericao&&<Field label="Próxima aferição programada" hint="Deixe em branco se ainda não tiver uma data definida.">
+
+        {controleIndividual?(
+          <Field label="Código de identificação da unidade" required>
+            <input value={codigo} onChange={e=>setCodigo(e.target.value)} style={inputStyle} placeholder="Ex.: FER-0123"/>
+          </Field>
+        ):(!editandoUnidade&&
+          <Field label="Quantidade a adicionar ao estoque" required hint="Se já existir estoque desse tipo nessa filial, soma à quantidade atual.">
+            <input type="number" min="1" value={quantidade} onChange={e=>setQuantidade(e.target.value)} style={inputStyle} placeholder="Ex.: 5"/>
+          </Field>
+        )}
+        {!editandoUnidade&&controleIndividual&&requerAfericao&&<Field label="Próxima aferição programada" hint="Deixe em branco se ainda não tiver uma data definida.">
           <input type="date" value={dataProximaAfericao} onChange={e=>setDataProximaAfericao(e.target.value)} style={inputStyle}/>
         </Field>}
         <Field label="Observações">
@@ -882,7 +962,7 @@ function ModalNovaFerramenta({onClose,onSaved,filiais,categorias,profile,editand
 
 function traduzErro(err){
   const m=err?.message||"";
-  if(/duplicate key/i.test(m))return "Já existe uma ferramenta com esse código nessa filial.";
+  if(/duplicate key/i.test(m))return "Já existe um registro com esse código/nome.";
   return m||"Ocorreu um erro. Tente novamente.";
 }
 
@@ -924,7 +1004,7 @@ function ModalAcao({ferramenta,tipo,onClose,onDone,pessoasFilial}){
       <ErrorBox>{error}</ErrorBox>
       <div style={{marginBottom:16,padding:12,borderRadius:10,background:"#F9FAFB",border:"1px solid #F1F5F9"}}>
         <div style={{fontSize:11,color:"#9CA3AF",fontWeight:700,textTransform:"uppercase",marginBottom:2}}>{ferramenta.codigo}</div>
-        <div style={{fontSize:14,fontWeight:700,color:"#111827"}}>{ferramenta.nome}</div>
+        <div style={{fontSize:14,fontWeight:700,color:"#111827"}}>{ferramenta.catalogo?.nome}</div>
       </div>
       <div style={{display:"flex",flexDirection:"column",gap:14}}>
         {CONFIG.needsPessoa&&(
@@ -943,7 +1023,7 @@ function ModalAcao({ferramenta,tipo,onClose,onDone,pessoasFilial}){
   );
 }
 
-function FerramentaDetalheModal({ferramenta,onClose,onChanged,profile,filiais,categorias,pessoasFilial}){
+function FerramentaDetalheModal({ferramenta,onClose,onChanged,profile,filiais,categorias,catalogos,pessoasFilial}){
   const[historico,setHistorico]=useState([]);
   const[loadingHist,setLoadingHist]=useState(true);
   const[acao,setAcao]=useState(null);
@@ -961,7 +1041,7 @@ function FerramentaDetalheModal({ferramenta,onClose,onChanged,profile,filiais,ca
   useEffect(()=>{loadHist();},[ferramenta.id]);
 
   const filialNome=filiais.find(f=>f.id===ferramenta.filial_id)?.nome||"—";
-  const categoriaObj=categorias.find(c=>c.id===ferramenta.categoria_id);
+  const categoriaObj=categorias.find(c=>c.id===ferramenta.catalogo?.categoria_id);
   const requerAfericao=!!categoriaObj?.requer_afericao;
   const ACTIONS_BY_STATUS={
     disponivel:[
@@ -989,7 +1069,7 @@ function FerramentaDetalheModal({ferramenta,onClose,onChanged,profile,filiais,ca
       <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",marginBottom:16}}>
         <div>
           <div style={{fontSize:11,color:"#9CA3AF",fontWeight:700,textTransform:"uppercase",marginBottom:2}}>{ferramenta.codigo}</div>
-          <div style={{fontSize:18,fontWeight:800,color:"#111827"}}>{ferramenta.nome}</div>
+          <div style={{fontSize:18,fontWeight:800,color:"#111827"}}>{ferramenta.catalogo?.nome}</div>
           <div style={{fontSize:12,color:"#6B7280",marginTop:4,display:"flex",alignItems:"center",gap:5}}>
             <MapPin size={12}/>{filialNome}{categoriaObj?` · ${categoriaObj.nome}`:""}
           </div>
@@ -1062,7 +1142,7 @@ function FerramentaDetalheModal({ferramenta,onClose,onChanged,profile,filiais,ca
       {acao&&<ModalAcao ferramenta={ferramenta} tipo={acao} pessoasFilial={pessoasFilial}
         onClose={()=>setAcao(null)}
         onDone={()=>{setAcao(null);loadHist();onChanged();}}/>}
-      {editando&&<ModalNovaFerramenta editando={ferramenta} filiais={filiais} categorias={categorias} profile={profile}
+      {editando&&<ModalNovaFerramenta editandoUnidade={ferramenta} filiais={filiais} categorias={categorias} catalogos={catalogos} profile={profile}
         onClose={()=>setEditando(false)}
         onSaved={()=>{setEditando(false);onChanged();}}/>}
     </Modal>
@@ -1077,48 +1157,165 @@ function InfoBox({label,value}){
   );
 }
 
-function FerramentasView({profile,filiais,categorias,pessoas}){
+function ModalEstoqueDetalhe({estoque,onClose,onChanged,profile,filiais}){
+  const[emprestimos,setEmprestimos]=useState([]);
+  const[loadingEmp,setLoadingEmp]=useState(true);
+  const[ajustando,setAjustando]=useState(false);
+  const[novaQtd,setNovaQtd]=useState(estoque.quantidade_total);
+  const[salvandoQtd,setSalvandoQtd]=useState(false);
+  const[error,setError]=useState("");
+  const isAdmin=profile.userType==="admin_geral"||profile.userType==="admin_area";
+  const filialNome=filiais.find(f=>f.id===estoque.filial_id)?.nome||"—";
+
+  async function load(){
+    setLoadingEmp(true);
+    const{data}=await supabase.from("emprestimos")
+      .select("*, colaborador:colaborador_id(name)")
+      .eq("estoque_id",estoque.id).order("data_retirada",{ascending:false}).limit(30);
+    setEmprestimos(data||[]);
+    setLoadingEmp(false);
+  }
+  useEffect(()=>{load();},[estoque.id]);
+
+  async function salvarQtd(){
+    const qtd=parseInt(novaQtd,10);
+    if(isNaN(qtd)||qtd<0){setError("Quantidade inválida.");return;}
+    setSalvandoQtd(true);setError("");
+    const{error:err}=await supabase.from("estoque_pool").update({quantidade_total:qtd}).eq("id",estoque.id);
+    setSalvandoQtd(false);
+    if(err){setError(err.message);return;}
+    setAjustando(false);
+    onChanged();
+  }
+
+  const ativos=emprestimos.filter(e=>!e.data_devolucao);
+  const historico=emprestimos.filter(e=>e.data_devolucao);
+
+  return(
+    <Modal title="Estoque da Ferramenta" onClose={onClose} width={560}>
+      <ErrorBox>{error}</ErrorBox>
+      <div style={{marginBottom:16}}>
+        <div style={{fontSize:18,fontWeight:800,color:"#111827"}}>{estoque.catalogo?.nome}</div>
+        <div style={{fontSize:12,color:"#6B7280",marginTop:4,display:"flex",alignItems:"center",gap:5}}>
+          <MapPin size={12}/>{filialNome}
+        </div>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}}>
+        <InfoBox label="Quantidade total" value={estoque.quantidade_total}/>
+        <InfoBox label="Disponível" value={estoque.quantidade_disponivel}/>
+      </div>
+      {isAdmin&&(ajustando?(
+        <div style={{display:"flex",gap:8,alignItems:"flex-end",marginBottom:20}}>
+          <Field label="Nova quantidade total">
+            <input type="number" min="0" value={novaQtd} onChange={e=>setNovaQtd(e.target.value)} style={inputStyle}/>
+          </Field>
+          <BtnPrimary onClick={salvarQtd} loading={salvandoQtd}>Salvar</BtnPrimary>
+          <BtnSecondary onClick={()=>setAjustando(false)}>Cancelar</BtnSecondary>
+        </div>
+      ):(
+        <button onClick={()=>setAjustando(true)} style={{display:"flex",alignItems:"center",gap:6,border:"none",
+          background:"none",color:BLUE,fontSize:12,fontWeight:700,cursor:"pointer",padding:0,marginBottom:20}}>
+          <Pencil size={12}/>Ajustar quantidade total
+        </button>
+      ))}
+
+      <div style={{marginBottom:20}}>
+        <div style={{fontSize:11,fontWeight:700,color:"#9CA3AF",textTransform:"uppercase",marginBottom:8,letterSpacing:".4px"}}>Emprestado agora ({ativos.length})</div>
+        {loadingEmp?<div style={{padding:20,textAlign:"center"}}><Spinner size={16}/></div>:
+        ativos.length===0?<div style={{fontSize:12.5,color:"#9CA3AF"}}>Nada emprestado no momento.</div>:(
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            {ativos.map(e=>(
+              <div key={e.id} style={{padding:"9px 12px",borderRadius:9,background:"#F9FAFB",border:"1px solid #F1F5F9"}}>
+                <div style={{fontSize:13,fontWeight:700,color:"#111827"}}>{e.colaborador?.name}</div>
+                <div style={{fontSize:11,color:"#9CA3AF"}}>{e.quantidade} un. · desde {fmtDateTime(e.data_retirada)}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {historico.length>0&&(
+        <div>
+          <div style={{fontSize:11,fontWeight:700,color:"#9CA3AF",textTransform:"uppercase",marginBottom:8,letterSpacing:".4px"}}>Histórico</div>
+          <div style={{display:"flex",flexDirection:"column",gap:0,maxHeight:180,overflowY:"auto"}}>
+            {historico.map(e=>(
+              <div key={e.id} style={{display:"flex",gap:10,padding:"9px 0",borderBottom:"1px solid #F8FAFC"}}>
+                <History size={14} color="#9CA3AF" style={{marginTop:2,flexShrink:0}}/>
+                <div style={{minWidth:0}}>
+                  <div style={{fontSize:12.5,fontWeight:700,color:"#111827"}}>{e.colaborador?.name} — {e.quantidade} un.</div>
+                  <div style={{fontSize:11,color:"#9CA3AF"}}>{fmtDateTime(e.data_retirada)} → {fmtDateTime(e.data_devolucao)}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCatalogos}){
   const isMobile=useIsMobile();
-  const[ferramentas,setFerramentas]=useState([]);
+  const[unidades,setUnidades]=useState([]);
+  const[estoques,setEstoques]=useState([]);
   const[loading,setLoading]=useState(true);
   const[busca,setBusca]=useState("");
   const[filtroStatus,setFiltroStatus]=useState("");
   const[filtroFilial,setFiltroFilial]=useState(profile.userType==="admin_geral"?"":profile.filialId);
   const[filtroCategoria,setFiltroCategoria]=useState("");
   const[selecionada,setSelecionada]=useState(null);
+  const[estoqueSelecionado,setEstoqueSelecionado]=useState(null);
   const[novaAberta,setNovaAberta]=useState(false);
   const isAdmin=profile.userType==="admin_geral"||profile.userType==="admin_area";
 
   async function load(){
     setLoading(true);
-    let q=supabase.from("ferramentas").select("*, colaborador_atual:colaborador_atual_id(name)").order("codigo");
-    if(profile.userType!=="admin_geral")q=q.eq("filial_id",profile.filialId);
-    else if(filtroFilial)q=q.eq("filial_id",filtroFilial);
-    if(filtroStatus)q=q.eq("status",filtroStatus);
-    if(filtroCategoria)q=q.eq("categoria_id",filtroCategoria);
-    const{data,error}=await q;
-    if(!error)setFerramentas(data||[]);
+    let qU=supabase.from("ferramentas_unidade").select("*, colaborador_atual:colaborador_atual_id(name), catalogo:catalogo_id(nome,categoria_id)").order("codigo");
+    let qE=supabase.from("estoque_pool").select("*, catalogo:catalogo_id(nome,categoria_id)");
+    if(profile.userType!=="admin_geral"){qU=qU.eq("filial_id",profile.filialId);qE=qE.eq("filial_id",profile.filialId);}
+    else if(filtroFilial){qU=qU.eq("filial_id",filtroFilial);qE=qE.eq("filial_id",filtroFilial);}
+    if(filtroStatus)qU=qU.eq("status",filtroStatus);
+    if(filtroCategoria){
+      const idsCat=catalogos.filter(c=>c.categoria_id===filtroCategoria).map(c=>c.id);
+      const filtro=idsCat.length?idsCat:["00000000-0000-0000-0000-000000000000"];
+      qU=qU.in("catalogo_id",filtro);qE=qE.in("catalogo_id",filtro);
+    }
+    const[{data:dU},{data:dE},{data:emp}]=await Promise.all([
+      qU, qE, supabase.from("emprestimos").select("estoque_id,quantidade").is("data_devolucao",null),
+    ]);
+    setUnidades(dU||[]);
+    const empMap={};
+    (emp||[]).forEach(e=>{empMap[e.estoque_id]=(empMap[e.estoque_id]||0)+e.quantidade;});
+    setEstoques((dE||[]).map(e=>({...e,quantidade_emprestada:empMap[e.id]||0,quantidade_disponivel:e.quantidade_total-(empMap[e.id]||0)})));
     setLoading(false);
   }
   useEffect(()=>{load();},[filtroStatus,filtroFilial,filtroCategoria,profile.filialId]);
 
-  const filtradas=useMemo(()=>{
+  const unidadesFiltradas=useMemo(()=>{
     const t=busca.trim().toLowerCase();
-    if(!t)return ferramentas;
-    return ferramentas.filter(f=>f.codigo.toLowerCase().includes(t)||f.nome.toLowerCase().includes(t));
-  },[ferramentas,busca]);
+    if(!t)return unidades;
+    return unidades.filter(f=>f.codigo.toLowerCase().includes(t)||(f.catalogo?.nome||"").toLowerCase().includes(t));
+  },[unidades,busca]);
+  const estoquesFiltrados=useMemo(()=>{
+    if(filtroStatus)return [];
+    const t=busca.trim().toLowerCase();
+    if(!t)return estoques;
+    return estoques.filter(e=>(e.catalogo?.nome||"").toLowerCase().includes(t));
+  },[estoques,busca,filtroStatus]);
 
   const pessoasFilial=useMemo(()=>{
     const fid=selecionada?.filial_id;
     return pessoas.filter(p=>p.filial_id===fid);
   },[pessoas,selecionada]);
 
+  const totalItens=unidadesFiltradas.length+estoquesFiltrados.length;
+
   return(
     <div className="fade" style={{padding:isMobile?"20px 16px":"28px 32px"}}>
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:20,flexWrap:"wrap",gap:12}}>
         <div>
           <h1 style={{fontSize:22,fontWeight:800,color:"#111827",margin:"0 0 4px"}}>Ferramentas</h1>
-          <p style={{fontSize:13,color:"#6B7280",margin:0}}>{filtradas.length} ferramenta(s)</p>
+          <p style={{fontSize:13,color:"#6B7280",margin:0}}>{totalItens} item(ns)</p>
         </div>
         {isAdmin&&<BtnPrimary onClick={()=>setNovaAberta(true)}><Plus size={15}/>Nova Ferramenta</BtnPrimary>}
       </div>
@@ -1146,20 +1343,33 @@ function FerramentasView({profile,filiais,categorias,pessoas}){
       </div>
 
       {loading?<div style={{padding:60,textAlign:"center"}}><Spinner size={20}/></div>:
-      filtradas.length===0?<EmptyState icon={Wrench} title="Nenhuma ferramenta encontrada" text="Ajuste os filtros ou cadastre uma nova ferramenta."/>:
+      totalItens===0?<EmptyState icon={Wrench} title="Nenhuma ferramenta encontrada" text="Ajuste os filtros ou cadastre uma nova ferramenta."/>:
       isMobile?(
         <div style={{display:"flex",flexDirection:"column",gap:10}}>
-          {filtradas.map(f=>(
+          {estoquesFiltrados.map(e=>(
+            <button key={"pool-"+e.id} onClick={()=>setEstoqueSelecionado(e)} className="lift"
+              style={{textAlign:"left",background:"#fff",border:"1px solid #F1F5F9",borderRadius:14,padding:14,cursor:"pointer"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
+                <div>
+                  <div style={{fontSize:11,color:"#9CA3AF",fontWeight:700}}>ESTOQUE</div>
+                  <div style={{fontSize:14,fontWeight:700,color:"#111827"}}>{e.catalogo?.nome}</div>
+                </div>
+                <span style={{fontSize:12,fontWeight:800,color:e.quantidade_disponivel>0?"#059669":"#B91C1C"}}>
+                  {e.quantidade_disponivel}/{e.quantidade_total}
+                </span>
+              </div>
+            </button>
+          ))}
+          {unidadesFiltradas.map(f=>(
             <button key={f.id} onClick={()=>setSelecionada(f)} className="lift"
               style={{textAlign:"left",background:"#fff",border:"1px solid #F1F5F9",borderRadius:14,padding:14,cursor:"pointer"}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
                 <div>
                   <div style={{fontSize:11,color:"#9CA3AF",fontWeight:700}}>{f.codigo}</div>
-                  <div style={{fontSize:14,fontWeight:700,color:"#111827"}}>{f.nome}</div>
+                  <div style={{fontSize:14,fontWeight:700,color:"#111827"}}>{f.catalogo?.nome}</div>
                 </div>
                 <StatusBadge status={f.status}/>
               </div>
-              {categorias.find(c=>c.id===f.categoria_id)&&<div style={{fontSize:11,color:"#9CA3AF",marginTop:4}}>{categorias.find(c=>c.id===f.categoria_id).nome}</div>}
               {f.colaborador_atual?.name&&<div style={{fontSize:12,color:"#6B7280",marginTop:6}}>Com: {f.colaborador_atual.name}</div>}
             </button>
           ))}
@@ -1175,12 +1385,28 @@ function FerramentasView({profile,filiais,categorias,pessoas}){
               </tr>
             </thead>
             <tbody>
-              {filtradas.map(f=>(
+              {estoquesFiltrados.map(e=>(
+                <tr key={"pool-"+e.id} className="row-hover" onClick={()=>setEstoqueSelecionado(e)}
+                  style={{borderTop:"1px solid #F1F5F9",cursor:"pointer"}}>
+                  <td style={{padding:"12px 16px",fontSize:13,fontWeight:700,color:"#9CA3AF"}}>—</td>
+                  <td style={{padding:"12px 16px",fontSize:13,color:"#374151"}}>{e.catalogo?.nome}</td>
+                  <td style={{padding:"12px 16px",fontSize:13,color:"#6B7280"}}>{categorias.find(c=>c.id===e.catalogo?.categoria_id)?.nome||"—"}</td>
+                  <td style={{padding:"12px 16px"}}>
+                    <span style={{fontSize:12,fontWeight:800,color:e.quantidade_disponivel>0?"#059669":"#B91C1C"}}>
+                      {e.quantidade_disponivel}/{e.quantidade_total} disponível
+                    </span>
+                  </td>
+                  <td style={{padding:"12px 16px",fontSize:13,color:"#374151"}}>{e.quantidade_emprestada>0?`${e.quantidade_emprestada} emprestada(s)`:"—"}</td>
+                  <td style={{padding:"12px 16px",fontSize:13,color:"#374151"}}>—</td>
+                  <td style={{padding:"12px 16px"}}><ChevronRight size={15} color="#9CA3AF"/></td>
+                </tr>
+              ))}
+              {unidadesFiltradas.map(f=>(
                 <tr key={f.id} className="row-hover" onClick={()=>setSelecionada(f)}
                   style={{borderTop:"1px solid #F1F5F9",cursor:"pointer"}}>
                   <td style={{padding:"12px 16px",fontSize:13,fontWeight:700,color:"#111827"}}>{f.codigo}</td>
-                  <td style={{padding:"12px 16px",fontSize:13,color:"#374151"}}>{f.nome}</td>
-                  <td style={{padding:"12px 16px",fontSize:13,color:"#6B7280"}}>{categorias.find(c=>c.id===f.categoria_id)?.nome||"—"}</td>
+                  <td style={{padding:"12px 16px",fontSize:13,color:"#374151"}}>{f.catalogo?.nome}</td>
+                  <td style={{padding:"12px 16px",fontSize:13,color:"#6B7280"}}>{categorias.find(c=>c.id===f.catalogo?.categoria_id)?.nome||"—"}</td>
                   <td style={{padding:"12px 16px"}}><StatusBadge status={f.status}/></td>
                   <td style={{padding:"12px 16px",fontSize:13,color:"#374151"}}>{f.colaborador_atual?.name||"—"}</td>
                   <td style={{padding:"12px 16px",fontSize:13,color:"#374151"}}>{fmtDate(f.data_proxima_afericao)}</td>
@@ -1192,15 +1418,18 @@ function FerramentasView({profile,filiais,categorias,pessoas}){
         </div>
       )}
 
-      {selecionada&&<FerramentaDetalheModal ferramenta={selecionada} profile={profile} filiais={filiais} categorias={categorias}
+      {selecionada&&<FerramentaDetalheModal ferramenta={selecionada} profile={profile} filiais={filiais} categorias={categorias} catalogos={catalogos}
         pessoasFilial={pessoasFilial}
         onClose={()=>setSelecionada(null)}
         onChanged={()=>{load();
-          supabase.from("ferramentas").select("*, colaborador_atual:colaborador_atual_id(name)").eq("id",selecionada.id).single()
+          supabase.from("ferramentas_unidade").select("*, colaborador_atual:colaborador_atual_id(name), catalogo:catalogo_id(nome,categoria_id)").eq("id",selecionada.id).single()
             .then(({data})=>{if(data)setSelecionada(data);});
         }}/>}
-      {novaAberta&&<ModalNovaFerramenta filiais={filiais} categorias={categorias} profile={profile}
-        onClose={()=>setNovaAberta(false)} onSaved={()=>{setNovaAberta(false);load();}}/>}
+      {estoqueSelecionado&&<ModalEstoqueDetalhe estoque={estoqueSelecionado} profile={profile} filiais={filiais}
+        onClose={()=>setEstoqueSelecionado(null)}
+        onChanged={()=>{load();setEstoqueSelecionado(null);}}/>}
+      {novaAberta&&<ModalNovaFerramenta filiais={filiais} categorias={categorias} catalogos={catalogos} profile={profile}
+        onClose={()=>setNovaAberta(false)} onSaved={()=>{setNovaAberta(false);reloadCatalogos&&reloadCatalogos();load();}}/>}
     </div>
   );
 }
@@ -1312,7 +1541,7 @@ function ModalEnviarConserto({onClose,onDone,ferramentasDisponiveis}){
         <Field label="Ferramenta" required>
           <select value={ferramentaId} onChange={e=>setFerramentaId(e.target.value)} style={inputStyle}>
             <option value="">Selecione (só ferramentas disponíveis)...</option>
-            {ferramentasDisponiveis.map(f=><option key={f.id} value={f.id}>{f.codigo} — {f.nome}</option>)}
+            {ferramentasDisponiveis.map(f=><option key={f.id} value={f.id}>{f.codigo} — {f.catalogo?.nome}</option>)}
           </select>
         </Field>
         <Field label="Motivo do conserto" required>
@@ -1349,7 +1578,7 @@ function ModalRetornoConserto({manutencao,onClose,onDone,isAdmin}){
       <ErrorBox>{error}</ErrorBox>
       <div style={{marginBottom:14,padding:12,borderRadius:10,background:"#F9FAFB",border:"1px solid #F1F5F9"}}>
         <div style={{fontSize:11,color:"#9CA3AF",fontWeight:700}}>{manutencao.ferramenta?.codigo}</div>
-        <div style={{fontSize:14,fontWeight:700,color:"#111827"}}>{manutencao.ferramenta?.nome}</div>
+        <div style={{fontSize:14,fontWeight:700,color:"#111827"}}>{manutencao.ferramenta?.catalogo?.nome}</div>
       </div>
       <div style={{display:"flex",flexDirection:"column",gap:14}}>
         <Field label="Resultado do conserto" required>
@@ -1385,12 +1614,12 @@ function ManutencoesView({profile}){
 
   async function load(){
     setLoading(true);
-    let q=supabase.from("manutencoes").select("*, ferramenta:ferramenta_id(codigo,nome,filial_id)").order("data_envio",{ascending:false});
+    let q=supabase.from("manutencoes").select("*, ferramenta:ferramenta_id(codigo,filial_id,catalogo:catalogo_id(nome))").order("data_envio",{ascending:false});
     const{data,error}=await q;
     const filtradas=profile.userType==="admin_geral"?data:(data||[]).filter(m=>m.ferramenta?.filial_id===profile.filialId);
     if(!error)setLista(filtradas||[]);
 
-    let q2=supabase.from("ferramentas").select("id,codigo,nome").eq("status","disponivel");
+    let q2=supabase.from("ferramentas_unidade").select("id,codigo,catalogo:catalogo_id(nome)").eq("status","disponivel");
     if(profile.userType!=="admin_geral")q2=q2.eq("filial_id",profile.filialId);
     const{data:d2}=await q2;
     setDisponiveis(d2||[]);
@@ -1416,7 +1645,7 @@ function ManutencoesView({profile}){
               <div style={{minWidth:0}}>
                 <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
                   <span style={{fontSize:11,color:"#9CA3AF",fontWeight:700}}>{m.ferramenta?.codigo}</span>
-                  <span style={{fontSize:14,fontWeight:700,color:"#111827"}}>{m.ferramenta?.nome}</span>
+                  <span style={{fontSize:14,fontWeight:700,color:"#111827"}}>{m.ferramenta?.catalogo?.nome}</span>
                   <span style={{display:"inline-flex",padding:"3px 9px",borderRadius:99,fontSize:11,fontWeight:700,
                     background:m.status==="em_conserto"?"#FDF2F8":m.status==="concluido"?"#ECFDF5":"#F3F4F6",
                     color:m.status==="em_conserto"?"#DB2777":m.status==="concluido"?"#059669":"#6B7280"}}>
@@ -1490,11 +1719,11 @@ function AuditoriaExecucaoView({auditoria,onBack,onChanged}){
 
   async function load(){
     setLoading(true);
-    const{data:ferramentas}=await supabase.from("ferramentas").select("id,codigo,nome").eq("filial_id",auditoria.filial_id).eq("ativo",true).order("codigo");
+    const{data:ferramentas}=await supabase.from("ferramentas_unidade").select("id,codigo,catalogo:catalogo_id(nome)").eq("filial_id",auditoria.filial_id).eq("ativo",true).order("codigo");
     const{data:existentes}=await supabase.from("auditoria_itens").select("*").eq("auditoria_id",auditoria.id);
     const map=new Map((existentes||[]).map(i=>[i.ferramenta_id,i]));
     setItens((ferramentas||[]).map(f=>({
-      ferramenta_id:f.id,codigo:f.codigo,nome:f.nome,
+      ferramenta_id:f.id,codigo:f.codigo,nome:f.catalogo?.nome,
       resultado:map.get(f.id)?.resultado||null,observacao:map.get(f.id)?.observacao||"",
     })));
     setLoading(false);
@@ -1845,7 +2074,7 @@ function RelatoriosView({profile,filiais}){
   const[loading,setLoading]=useState(true);
 
   useEffect(()=>{
-    let q=supabase.from("ferramentas").select("*, filial:filial_id(nome), colaborador_atual:colaborador_atual_id(name)").eq("ativo",true);
+    let q=supabase.from("ferramentas_unidade").select("*, filial:filial_id(nome), colaborador_atual:colaborador_atual_id(name), catalogo:catalogo_id(nome)").eq("ativo",true);
     if(profile.userType!=="admin_geral")q=q.eq("filial_id",profile.filialId);
     q.then(({data,error})=>{if(!error)setFerramentas(data||[]);setLoading(false);});
   },[profile.filialId]);
@@ -1856,7 +2085,7 @@ function RelatoriosView({profile,filiais}){
 
   function exportarAfericoes(){
     const rows=[...vencidas,...proximas].map(f=>({
-      Código:f.codigo,Nome:f.nome,Filial:f.filial?.nome,Status:STATUS_FERRAMENTA_INFO[f.status]?.label,
+      Código:f.codigo,Nome:f.catalogo?.nome,Filial:f.filial?.nome,Status:STATUS_FERRAMENTA_INFO[f.status]?.label,
       "Próxima Aferição":fmtDate(f.data_proxima_afericao),
     }));
     const ws=XLSX.utils.json_to_sheet(rows);
@@ -1901,7 +2130,7 @@ function RelatorioLinha({f}){
       display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,flexWrap:"wrap"}}>
       <div>
         <span style={{fontSize:11,color:"#9CA3AF",fontWeight:700}}>{f.codigo}</span>{" "}
-        <span style={{fontSize:13.5,fontWeight:700,color:"#111827"}}>{f.nome}</span>
+        <span style={{fontSize:13.5,fontWeight:700,color:"#111827"}}>{f.catalogo?.nome}</span>
         <span style={{fontSize:12,color:"#6B7280"}}> · {f.filial?.nome}</span>
       </div>
       <div style={{fontSize:12.5,fontWeight:700,color:"#374151"}}>{fmtDate(f.data_proxima_afericao)}</div>
@@ -2103,6 +2332,7 @@ function App(){
   const[profile,setProfile]=useState(null);
   const[filiais,setFiliais]=useState([]);
   const[categorias,setCategorias]=useState([]);
+  const[catalogos,setCatalogos]=useState([]);
   const[pessoas,setPessoas]=useState([]);
   const[activeNav,setActiveNav]=useState(null);
   const[configSection,setConfigSection]=useState("perfil");
@@ -2120,8 +2350,12 @@ function App(){
     const{data}=await supabase.from("categorias_ferramenta").select("*").eq("ativo",true).order("nome");
     setCategorias(data||[]);
   }
+  async function loadCatalogos(){
+    const{data}=await supabase.from("ferramentas_catalogo").select("*").eq("ativo",true).order("nome");
+    setCatalogos(data||[]);
+  }
   async function loadPessoas(){
-    const{data}=await supabase.from("profiles").select("id,name,filial_id").eq("is_active",true).order("name");
+    const{data}=await supabase.from("profiles").select("id,name,filial_id,matricula").eq("is_active",true).order("name");
     setPessoas(data||[]);
   }
   async function loadNotifications(userId){
@@ -2141,7 +2375,7 @@ function App(){
       filialId:prof.filial_id,filialNome:prof.filial?.nome,color:prof.color,
     });
     setActiveNav(prof.user_type==="colaborador"?"ferramentas":"dashboard");
-    await Promise.all([loadFiliais(),loadCategorias(),loadPessoas(),loadNotifications(prof.id)]);
+    await Promise.all([loadFiliais(),loadCategorias(),loadCatalogos(),loadPessoas(),loadNotifications(prof.id)]);
     setStatus("ready");
   }
 
@@ -2174,7 +2408,7 @@ function App(){
     setNotifications(prev=>prev.map(n=>({...n,is_read:true})));
   };
 
-  const commonProps={profile,filiais,categorias,pessoas};
+  const commonProps={profile,filiais,categorias,catalogos,pessoas};
   let content=null;
   if(viewingProfile){
     content=<div style={{padding:isMobile?"20px 16px":"28px 32px"}}>
@@ -2187,7 +2421,7 @@ function App(){
   }else{
     switch(activeNav){
       case "dashboard": content=<DashboardView {...commonProps}/>; break;
-      case "ferramentas": content=<FerramentasView {...commonProps}/>; break;
+      case "ferramentas": content=<FerramentasView {...commonProps} reloadCatalogos={loadCatalogos}/>; break;
       case "movimentacoes": content=<MovimentacoesView {...commonProps}/>; break;
       case "manutencoes": content=<ManutencoesView {...commonProps}/>; break;
       case "auditorias": content=<AuditoriasView {...commonProps}/>; break;
