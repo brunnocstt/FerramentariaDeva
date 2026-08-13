@@ -1709,7 +1709,7 @@ function DevolucaoColaborador({colaborador,onVoltar}){
   );
 }
 
-function RetiradasView(){
+function RetiradasView({filiais}){
   const isMobile=useIsMobile();
   const[modo,setModo]=useState("retirar");
   const[matricula,setMatricula]=useState("");
@@ -1722,10 +1722,30 @@ function RetiradasView(){
 
   async function buscar(e){
     e.preventDefault();
-    if(!matricula.trim())return;
+    const bruto=matricula.trim();
+    if(!bruto)return;
     setBuscando(true);setErro("");
-    const{data,error}=await supabase.from("profiles").select("id,name,filial_id,matricula")
-      .eq("matricula",matricula.trim()).eq("is_active",true).maybeSingle();
+
+    // O leitor de código de barras lê o crachá inteiro (filial + matrícula
+    // no mesmo código, ex.: 055003000830 → filial 55003 + matrícula 830).
+    // Dividimos o código lido ao meio e convertemos cada metade pra número
+    // (isso descarta os zeros à esquerda de ambos os lados sozinho).
+    // Se não parecer um código completo (digitação manual só da matrícula,
+    // ex.: "830"), busca só por matrícula — o RLS já restringe à própria
+    // filial de quem está operando a tela.
+    const digitos=bruto.replace(/\D/g,"");
+    let query=supabase.from("profiles").select("id,name,filial_id,matricula").eq("is_active",true);
+    if(digitos.length>=8){
+      const meio=Math.floor(digitos.length/2);
+      const filialCodigo=String(parseInt(digitos.slice(0,meio),10));
+      const matriculaLida=String(parseInt(digitos.slice(meio),10));
+      const filial=(filiais||[]).find(f=>f.codigo_barras&&String(parseInt(f.codigo_barras,10))===filialCodigo);
+      if(!filial){setBuscando(false);setErro("Filial não reconhecida nesse código de barras. Verifique o cadastro em Configurações → Filiais.");return;}
+      query=query.eq("filial_id",filial.id).eq("matricula",matriculaLida);
+    }else{
+      query=query.eq("matricula",digitos||bruto);
+    }
+    const{data,error}=await query.maybeSingle();
     setBuscando(false);
     if(error||!data){setErro("Matrícula não encontrada ou colaborador inativo.");return;}
     setColaborador(data);
@@ -2283,7 +2303,7 @@ function ModalUsuario({onClose,onSaved,filiais,profile,editando}){
         <Field label="E-mail" required>
           <input type="email" value={email} onChange={e=>setEmail(e.target.value)} style={inputStyle} disabled={!!editando}/>
         </Field>
-        <Field label="Matrícula" hint="Número lido pelo leitor de código de barras do crachá, usado na tela de Retiradas.">
+        <Field label="Matrícula" hint="Só o número da matrícula (ex.: 830), sem o código da filial — o código de barras do crachá já traz os dois juntos e a tela de Retiradas separa automaticamente.">
           <input value={matricula} onChange={e=>setMatricula(e.target.value)} style={inputStyle} placeholder="Ex.: 00123"/>
         </Field>
         <Field label="Tipo de usuário" required>
@@ -2531,6 +2551,32 @@ function MeuPerfilCard({profile}){
   );
 }
 
+function FilialRow({filial,reload}){
+  const[codigo,setCodigo]=useState(filial.codigo_barras||"");
+  const[loading,setLoading]=useState(false);
+  const[error,setError]=useState("");
+  const alterado=codigo.trim()!==(filial.codigo_barras||"");
+
+  async function salvar(){
+    setLoading(true);setError("");
+    const{error:err}=await supabase.from("filiais").update({codigo_barras:codigo.trim()||null}).eq("id",filial.id);
+    setLoading(false);
+    if(err){setError(traduzErro(err));return;}
+    reload();
+  }
+
+  return(
+    <div style={{padding:"10px 14px",background:"#fff",border:"1px solid #F1F5F9",borderRadius:10,
+      display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+      <span style={{fontSize:13.5,fontWeight:600,color:"#111827",flex:"1 1 140px"}}>{filial.nome}</span>
+      <input value={codigo} onChange={e=>setCodigo(e.target.value)} placeholder="Ex.: 55003"
+        style={{...inputStyle,width:120,padding:"6px 10px",fontSize:12.5}}/>
+      {alterado&&<BtnPrimary onClick={salvar} loading={loading}>Salvar</BtnPrimary>}
+      {error&&<span style={{fontSize:11,color:"#B91C1C",flexBasis:"100%"}}>{error}</span>}
+    </div>
+  );
+}
+
 function ConfiguracoesView({profile,filiais,categorias,pessoas,reloadFiliais,reloadCategorias,activeSection,setActiveSection}){
   const isMobile=useIsMobile();
   const[novoNome,setNovoNome]=useState("");
@@ -2620,20 +2666,19 @@ function ConfiguracoesView({profile,filiais,categorias,pessoas,reloadFiliais,rel
 
           {activeSection==="filiais"&&isAdminGeral&&(<>
             <p style={{fontSize:15,fontWeight:800,color:"#111827",margin:"0 0 2px"}}>Filiais</p>
-            <p style={{fontSize:12,color:"#9CA3AF",margin:"0 0 16px"}}>Filiais com oficina cadastradas no sistema</p>
-            <div style={{maxWidth:440}}>
+            <p style={{fontSize:12,color:"#9CA3AF",margin:"0 0 16px"}}>
+              Filiais com oficina cadastradas no sistema. O "Código de barras" é a primeira metade do código lido
+              no crachá do colaborador (ex.: no código 055003000830, a filial é 55003) — necessário para a tela de Retiradas
+              reconhecer automaticamente a filial ao ler o crachá.
+            </p>
+            <div style={{maxWidth:520}}>
               <ErrorBox>{error}</ErrorBox>
               <div style={{display:"flex",gap:8,marginBottom:16}}>
                 <input value={novoNome} onChange={e=>setNovoNome(e.target.value)} style={inputStyle} placeholder="Nome da nova filial"/>
                 <BtnPrimary onClick={addFilial} loading={loading}>Adicionar</BtnPrimary>
               </div>
               <div style={{display:"flex",flexDirection:"column",gap:8}}>
-                {filiais.map(f=>(
-                  <div key={f.id} style={{padding:"10px 14px",background:"#fff",border:"1px solid #F1F5F9",borderRadius:10,
-                    fontSize:13.5,fontWeight:600,color:"#111827"}}>
-                    {f.nome}
-                  </div>
-                ))}
+                {filiais.map(f=><FilialRow key={f.id} filial={f} reload={reloadFiliais}/>)}
               </div>
             </div>
           </>)}
@@ -2769,7 +2814,7 @@ function App(){
   }else{
     switch(activeNav){
       case "dashboard": content=<DashboardView {...commonProps}/>; break;
-      case "retiradas": content=<RetiradasView/>; break;
+      case "retiradas": content=<RetiradasView filiais={filiais}/>; break;
       case "ferramentas": content=<FerramentasView {...commonProps} reloadCatalogos={loadCatalogos}/>; break;
       case "movimentacoes": content=<MovimentacoesView {...commonProps}/>; break;
       case "manutencoes": content=<ManutencoesView {...commonProps}/>; break;

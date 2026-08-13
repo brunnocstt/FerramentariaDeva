@@ -117,9 +117,9 @@ Reset de senha usa o mesmo padrão definitivo do app de referência: token custo
 
 | Tabela | Descrição | RLS |
 |---|---|---|
-| `filiais` | As 6 filiais com oficina (Betim, Juiz de Fora, Montes Claros, Pouso Alegre, Divinópolis, Belo Horizonte) | ✅ |
+| `filiais` | As 6 filiais com oficina (Betim, Juiz de Fora, Montes Claros, Pouso Alegre, Divinópolis, Belo Horizonte), cada uma com `codigo_barras` opcional (prefixo do código de barras do crachá — ver seção 7) | ✅ |
 | `categorias_ferramenta` | Categorias de ferramenta (editável em Configurações), cada uma com flags `requer_afericao` e `controle_individual` | ✅ |
-| `profiles` | Perfil de cada usuário, vinculado a `auth.users`, com `matricula` (crachá) opcional | ✅ |
+| `profiles` | Perfil de cada usuário, vinculado a `auth.users`, com `matricula` (crachá) opcional — única só **dentro da filial** (`unique(filial_id,matricula)`), não globalmente | ✅ |
 | `ferramentas_catalogo` | Cadastro **global** de tipos/modelos de ferramenta (não tem filial) | ✅ |
 | `ferramentas_unidade` | Unidade física individual de um tipo do catálogo, numa filial, com código próprio | ✅ |
 | `estoque_pool` | Quantidade total de um tipo do catálogo numa filial, sem código individual | ✅ |
@@ -185,7 +185,9 @@ Fora de escopo (registrado para não ser esquecido, não implementado): auditori
 
 ## 7. Tela Retiradas e Painel em Tempo Real
 
-**Fluxo do ferramenteiro** (tela "Retiradas", primeira opção no menu de `colaborador`): o leitor de código de barras USB do crachá funciona como teclado — "digita" a matrícula e envia Enter sozinho, então basta um `<input>` de texto normal com `onSubmit` de formulário, sem integração especial. A matrícula resolve para `profiles.matricula`, mostrando o nome do colaborador para confirmar.
+**Fluxo do ferramenteiro** (tela "Retiradas", primeira opção no menu de `colaborador`): o leitor de código de barras USB do crachá funciona como teclado — "digita" o código e envia Enter sozinho, então basta um `<input>` de texto normal com `onSubmit` de formulário, sem integração especial.
+
+**Formato do código de barras do crachá:** o código lido traz filial + matrícula no mesmo número (ex.: `055003000830` → filial `55003` + matrícula `830`). O front divide o código lido **ao meio** e converte cada metade pra inteiro (descarta os zeros à esquerda dos dois lados automaticamente, cobrindo matrícula de 3 a 4 dígitos sem configuração extra). A primeira metade é comparada com `filiais.codigo_barras` (cadastrado por filial em Configurações → Filiais — ver `FilialRow`); a segunda, com `profiles.matricula` **dentro daquela filial**. Entradas curtas (< 8 dígitos, ex. digitação manual de só "830") pulam essa divisão e buscam só por matrícula, escopada automaticamente pelo RLS de `profiles` à filial de quem está operando a tela. Como a mesma matrícula pode se repetir em filiais diferentes, `profiles.matricula` não é mais globalmente única — a unicidade real é `unique(filial_id, matricula)` (migration `0004_codigo_barras_cracha.sql`).
 
 - **Retirar**: lista as ferramentas disponíveis na filial do colaborador — unidades individuais livres e tipos em pool com saldo (com campo de quantidade). Ao confirmar, grava um INSERT em `movimentacoes` (tipo `retirada`, unidade individual) ou em `emprestimos` (pool).
 - **Devolver**: escolhe o colaborador **sem reler o crachá**, mostra tudo que está com ele (unidades + empréstimos em aberto) e devolve item a item — UPDATE em `movimentacoes`/`emprestimos` conforme o tipo.
