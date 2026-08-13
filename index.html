@@ -94,7 +94,7 @@ import{
   Lock,Mail,EyeOff,EyeIcon,Check,AlertCircle,RefreshCw,Building2,
   Clock,CheckCircle2,Pencil,Trash2,Menu,Filter,Wrench,PackageCheck,
   ClipboardList,ArrowLeftRight,Hash,MapPin,AlertTriangle,LayoutDashboard,
-  FileText,UserCheck,PackagePlus,PackageX,Ban,History
+  FileText,UserCheck,PackagePlus,PackageX,Ban,History,Tag
 }from "https://esm.sh/lucide-react?deps=react@18";
 
 /* ── SUPABASE ────────────────────────────────────── */
@@ -811,27 +811,30 @@ function DashboardView({profile,filiais}){
 /* ══════════════════════════════════════════════════════════════
    FERRAMENTAS
    ══════════════════════════════════════════════════════════════ */
-function ModalNovaFerramenta({onClose,onSaved,filiais,profile,editando}){
+function ModalNovaFerramenta({onClose,onSaved,filiais,categorias,profile,editando}){
   const[codigo,setCodigo]=useState(editando?.codigo||"");
   const[nome,setNome]=useState(editando?.nome||"");
-  const[categoria,setCategoria]=useState(editando?.categoria||"");
+  const[categoriaId,setCategoriaId]=useState(editando?.categoria_id||"");
   const[filialId,setFilialId]=useState(editando?.filial_id||(profile.userType==="admin_area"?profile.filialId:""));
   const[dataProximaAfericao,setDataProximaAfericao]=useState(editando?.data_proxima_afericao||"");
   const[observacoes,setObservacoes]=useState(editando?.observacoes||"");
   const[loading,setLoading]=useState(false);
   const[error,setError]=useState("");
 
+  const categoriaSelecionada=categorias.find(c=>c.id===categoriaId);
+  const requerAfericao=!!categoriaSelecionada?.requer_afericao;
+
   async function salvar(){
     if(!codigo||!nome||!filialId){setError("Preencha código, nome e filial.");return;}
     setLoading(true);setError("");
     if(editando){
-      const{error:err}=await supabase.from("ferramentas").update({codigo,nome,categoria:categoria||null,observacoes:observacoes||null}).eq("id",editando.id);
+      const{error:err}=await supabase.from("ferramentas").update({codigo,nome,categoria_id:categoriaId||null,observacoes:observacoes||null}).eq("id",editando.id);
       setLoading(false);
       if(err){setError(traduzErro(err));return;}
     }else{
       const{error:err}=await supabase.from("ferramentas").insert({
-        codigo,nome,categoria:categoria||null,filial_id:filialId,
-        data_proxima_afericao:dataProximaAfericao||null,observacoes:observacoes||null,
+        codigo,nome,categoria_id:categoriaId||null,filial_id:filialId,
+        data_proxima_afericao:requerAfericao?(dataProximaAfericao||null):null,observacoes:observacoes||null,
       });
       setLoading(false);
       if(err){setError(traduzErro(err));return;}
@@ -853,8 +856,11 @@ function ModalNovaFerramenta({onClose,onSaved,filiais,profile,editando}){
         <Field label="Nome da ferramenta" required>
           <input value={nome} onChange={e=>setNome(e.target.value)} style={inputStyle} placeholder="Ex.: Torquímetro 1/2&quot;"/>
         </Field>
-        <Field label="Categoria">
-          <input value={categoria} onChange={e=>setCategoria(e.target.value)} style={inputStyle} placeholder="Ex.: Ferramenta de medição"/>
+        <Field label="Categoria" hint={categoriaId?(requerAfericao?"Essa categoria exige controle de aferição.":"Essa categoria não exige aferição."):null}>
+          <select value={categoriaId} onChange={e=>setCategoriaId(e.target.value)} style={inputStyle}>
+            <option value="">Sem categoria</option>
+            {categorias.map(c=><option key={c.id} value={c.id}>{c.nome}</option>)}
+          </select>
         </Field>
         <Field label="Filial" required>
           <select value={filialId} onChange={e=>setFilialId(e.target.value)} style={inputStyle}
@@ -863,7 +869,7 @@ function ModalNovaFerramenta({onClose,onSaved,filiais,profile,editando}){
             {filiais.map(f=><option key={f.id} value={f.id}>{f.nome}</option>)}
           </select>
         </Field>
-        {!editando&&<Field label="Próxima aferição programada" hint="Deixe em branco se a ferramenta não exige aferição.">
+        {!editando&&requerAfericao&&<Field label="Próxima aferição programada" hint="Deixe em branco se ainda não tiver uma data definida.">
           <input type="date" value={dataProximaAfericao} onChange={e=>setDataProximaAfericao(e.target.value)} style={inputStyle}/>
         </Field>}
         <Field label="Observações">
@@ -937,7 +943,7 @@ function ModalAcao({ferramenta,tipo,onClose,onDone,pessoasFilial}){
   );
 }
 
-function FerramentaDetalheModal({ferramenta,onClose,onChanged,profile,filiais,pessoasFilial}){
+function FerramentaDetalheModal({ferramenta,onClose,onChanged,profile,filiais,categorias,pessoasFilial}){
   const[historico,setHistorico]=useState([]);
   const[loadingHist,setLoadingHist]=useState(true);
   const[acao,setAcao]=useState(null);
@@ -955,10 +961,12 @@ function FerramentaDetalheModal({ferramenta,onClose,onChanged,profile,filiais,pe
   useEffect(()=>{loadHist();},[ferramenta.id]);
 
   const filialNome=filiais.find(f=>f.id===ferramenta.filial_id)?.nome||"—";
+  const categoriaObj=categorias.find(c=>c.id===ferramenta.categoria_id);
+  const requerAfericao=!!categoriaObj?.requer_afericao;
   const ACTIONS_BY_STATUS={
     disponivel:[
       {tipo:"retirada",label:"Registrar Retirada",Icon:PackagePlus},
-      {tipo:"envio_afericao",label:"Enviar p/ Aferição",Icon:Clock},
+      ...(requerAfericao?[{tipo:"envio_afericao",label:"Enviar p/ Aferição",Icon:Clock}]:[]),
       {tipo:"extravio",label:"Reportar Extravio",Icon:AlertTriangle,danger:true},
       ...(isAdmin?[{tipo:"baixa",label:"Dar Baixa",Icon:Ban,danger:true,adminOnly:true}]:[]),
     ],
@@ -983,7 +991,7 @@ function FerramentaDetalheModal({ferramenta,onClose,onChanged,profile,filiais,pe
           <div style={{fontSize:11,color:"#9CA3AF",fontWeight:700,textTransform:"uppercase",marginBottom:2}}>{ferramenta.codigo}</div>
           <div style={{fontSize:18,fontWeight:800,color:"#111827"}}>{ferramenta.nome}</div>
           <div style={{fontSize:12,color:"#6B7280",marginTop:4,display:"flex",alignItems:"center",gap:5}}>
-            <MapPin size={12}/>{filialNome}{ferramenta.categoria?` · ${ferramenta.categoria}`:""}
+            <MapPin size={12}/>{filialNome}{categoriaObj?` · ${categoriaObj.nome}`:""}
           </div>
         </div>
         <StatusBadge status={ferramenta.status}/>
@@ -991,9 +999,11 @@ function FerramentaDetalheModal({ferramenta,onClose,onChanged,profile,filiais,pe
 
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}}>
         <InfoBox label="Com quem está" value={ferramenta.colaborador_atual?.name||"—"}/>
-        <InfoBox label="Última aferição" value={fmtDate(ferramenta.data_ultima_afericao)}/>
-        <InfoBox label="Próxima aferição" value={fmtDate(ferramenta.data_proxima_afericao)}/>
-        <InfoBox label="Saída p/ aferição" value={fmtDate(ferramenta.data_saida_afericao)}/>
+        {requerAfericao&&<>
+          <InfoBox label="Última aferição" value={fmtDate(ferramenta.data_ultima_afericao)}/>
+          <InfoBox label="Próxima aferição" value={fmtDate(ferramenta.data_proxima_afericao)}/>
+          <InfoBox label="Saída p/ aferição" value={fmtDate(ferramenta.data_saida_afericao)}/>
+        </>}
       </div>
 
       {isAdmin&&(
@@ -1052,7 +1062,7 @@ function FerramentaDetalheModal({ferramenta,onClose,onChanged,profile,filiais,pe
       {acao&&<ModalAcao ferramenta={ferramenta} tipo={acao} pessoasFilial={pessoasFilial}
         onClose={()=>setAcao(null)}
         onDone={()=>{setAcao(null);loadHist();onChanged();}}/>}
-      {editando&&<ModalNovaFerramenta editando={ferramenta} filiais={filiais} profile={profile}
+      {editando&&<ModalNovaFerramenta editando={ferramenta} filiais={filiais} categorias={categorias} profile={profile}
         onClose={()=>setEditando(false)}
         onSaved={()=>{setEditando(false);onChanged();}}/>}
     </Modal>
@@ -1067,13 +1077,14 @@ function InfoBox({label,value}){
   );
 }
 
-function FerramentasView({profile,filiais,pessoas}){
+function FerramentasView({profile,filiais,categorias,pessoas}){
   const isMobile=useIsMobile();
   const[ferramentas,setFerramentas]=useState([]);
   const[loading,setLoading]=useState(true);
   const[busca,setBusca]=useState("");
   const[filtroStatus,setFiltroStatus]=useState("");
   const[filtroFilial,setFiltroFilial]=useState(profile.userType==="admin_geral"?"":profile.filialId);
+  const[filtroCategoria,setFiltroCategoria]=useState("");
   const[selecionada,setSelecionada]=useState(null);
   const[novaAberta,setNovaAberta]=useState(false);
   const isAdmin=profile.userType==="admin_geral"||profile.userType==="admin_area";
@@ -1084,11 +1095,12 @@ function FerramentasView({profile,filiais,pessoas}){
     if(profile.userType!=="admin_geral")q=q.eq("filial_id",profile.filialId);
     else if(filtroFilial)q=q.eq("filial_id",filtroFilial);
     if(filtroStatus)q=q.eq("status",filtroStatus);
+    if(filtroCategoria)q=q.eq("categoria_id",filtroCategoria);
     const{data,error}=await q;
     if(!error)setFerramentas(data||[]);
     setLoading(false);
   }
-  useEffect(()=>{load();},[filtroStatus,filtroFilial,profile.filialId]);
+  useEffect(()=>{load();},[filtroStatus,filtroFilial,filtroCategoria,profile.filialId]);
 
   const filtradas=useMemo(()=>{
     const t=busca.trim().toLowerCase();
@@ -1127,6 +1139,10 @@ function FerramentasView({profile,filiais,pessoas}){
             {filiais.map(f=><option key={f.id} value={f.id}>{f.nome}</option>)}
           </select>
         )}
+        <select value={filtroCategoria} onChange={e=>setFiltroCategoria(e.target.value)} style={{...inputStyle,width:"auto"}}>
+          <option value="">Todas as categorias</option>
+          {categorias.map(c=><option key={c.id} value={c.id}>{c.nome}</option>)}
+        </select>
       </div>
 
       {loading?<div style={{padding:60,textAlign:"center"}}><Spinner size={20}/></div>:
@@ -1143,6 +1159,7 @@ function FerramentasView({profile,filiais,pessoas}){
                 </div>
                 <StatusBadge status={f.status}/>
               </div>
+              {categorias.find(c=>c.id===f.categoria_id)&&<div style={{fontSize:11,color:"#9CA3AF",marginTop:4}}>{categorias.find(c=>c.id===f.categoria_id).nome}</div>}
               {f.colaborador_atual?.name&&<div style={{fontSize:12,color:"#6B7280",marginTop:6}}>Com: {f.colaborador_atual.name}</div>}
             </button>
           ))}
@@ -1152,7 +1169,7 @@ function FerramentasView({profile,filiais,pessoas}){
           <table style={{width:"100%",borderCollapse:"collapse"}}>
             <thead>
               <tr style={{background:"#F9FAFB"}}>
-                {["Código","Nome","Status","Com quem está","Próx. Aferição",""].map(h=>(
+                {["Código","Nome","Categoria","Status","Com quem está","Próx. Aferição",""].map(h=>(
                   <th key={h} style={{padding:"10px 16px",textAlign:"left",fontSize:11,fontWeight:700,color:"#6B7280",textTransform:"uppercase"}}>{h}</th>
                 ))}
               </tr>
@@ -1163,6 +1180,7 @@ function FerramentasView({profile,filiais,pessoas}){
                   style={{borderTop:"1px solid #F1F5F9",cursor:"pointer"}}>
                   <td style={{padding:"12px 16px",fontSize:13,fontWeight:700,color:"#111827"}}>{f.codigo}</td>
                   <td style={{padding:"12px 16px",fontSize:13,color:"#374151"}}>{f.nome}</td>
+                  <td style={{padding:"12px 16px",fontSize:13,color:"#6B7280"}}>{categorias.find(c=>c.id===f.categoria_id)?.nome||"—"}</td>
                   <td style={{padding:"12px 16px"}}><StatusBadge status={f.status}/></td>
                   <td style={{padding:"12px 16px",fontSize:13,color:"#374151"}}>{f.colaborador_atual?.name||"—"}</td>
                   <td style={{padding:"12px 16px",fontSize:13,color:"#374151"}}>{fmtDate(f.data_proxima_afericao)}</td>
@@ -1174,14 +1192,14 @@ function FerramentasView({profile,filiais,pessoas}){
         </div>
       )}
 
-      {selecionada&&<FerramentaDetalheModal ferramenta={selecionada} profile={profile} filiais={filiais}
+      {selecionada&&<FerramentaDetalheModal ferramenta={selecionada} profile={profile} filiais={filiais} categorias={categorias}
         pessoasFilial={pessoasFilial}
         onClose={()=>setSelecionada(null)}
         onChanged={()=>{load();
           supabase.from("ferramentas").select("*, colaborador_atual:colaborador_atual_id(name)").eq("id",selecionada.id).single()
             .then(({data})=>{if(data)setSelecionada(data);});
         }}/>}
-      {novaAberta&&<ModalNovaFerramenta filiais={filiais} profile={profile}
+      {novaAberta&&<ModalNovaFerramenta filiais={filiais} categorias={categorias} profile={profile}
         onClose={()=>setNovaAberta(false)} onSaved={()=>{setNovaAberta(false);load();}}/>}
     </div>
   );
@@ -1936,11 +1954,15 @@ function MeuPerfilCard({profile}){
   );
 }
 
-function ConfiguracoesView({profile,filiais,pessoas,reloadFiliais,activeSection,setActiveSection}){
+function ConfiguracoesView({profile,filiais,categorias,pessoas,reloadFiliais,reloadCategorias,activeSection,setActiveSection}){
   const isMobile=useIsMobile();
   const[novoNome,setNovoNome]=useState("");
   const[loading,setLoading]=useState(false);
   const[error,setError]=useState("");
+  const[catNome,setCatNome]=useState("");
+  const[catRequerAfericao,setCatRequerAfericao]=useState(false);
+  const[catLoading,setCatLoading]=useState(false);
+  const[catError,setCatError]=useState("");
   const isAdminGeral=profile.userType==="admin_geral";
 
   async function addFilial(){
@@ -1952,10 +1974,20 @@ function ConfiguracoesView({profile,filiais,pessoas,reloadFiliais,activeSection,
     setNovoNome("");reloadFiliais();
   }
 
+  async function addCategoria(){
+    if(!catNome.trim())return;
+    setCatLoading(true);setCatError("");
+    const{error:err}=await supabase.from("categorias_ferramenta").insert({nome:catNome.trim(),requer_afericao:catRequerAfericao});
+    setCatLoading(false);
+    if(err){setCatError(err.message);return;}
+    setCatNome("");setCatRequerAfericao(false);reloadCategorias();
+  }
+
   const SECTIONS=[
     {id:"perfil",label:"Meu Perfil",Icon:UserCheck},
     {id:"usuarios",label:"Gestão de Usuários",Icon:UserPlus},
     ...(isAdminGeral?[{id:"filiais",label:"Filiais",Icon:Building2}]:[]),
+    ...(isAdminGeral?[{id:"categorias",label:"Categorias",Icon:Tag}]:[]),
   ];
 
   return(
@@ -2029,6 +2061,34 @@ function ConfiguracoesView({profile,filiais,pessoas,reloadFiliais,activeSection,
             </div>
           </>)}
 
+          {activeSection==="categorias"&&isAdminGeral&&(<>
+            <p style={{fontSize:15,fontWeight:800,color:"#111827",margin:"0 0 2px"}}>Categorias de Ferramenta</p>
+            <p style={{fontSize:12,color:"#9CA3AF",margin:"0 0 16px"}}>
+              Categorias marcadas como "exige aferição" pedem data de aferição e liberam a ação "Enviar p/ Aferição" nas ferramentas dessa categoria.
+            </p>
+            <div style={{maxWidth:480}}>
+              <ErrorBox>{catError}</ErrorBox>
+              <div style={{display:"flex",gap:8,marginBottom:10,flexWrap:"wrap"}}>
+                <input value={catNome} onChange={e=>setCatNome(e.target.value)} style={{...inputStyle,flex:"1 1 200px"}} placeholder="Nome da nova categoria"/>
+                <BtnPrimary onClick={addCategoria} loading={catLoading}>Adicionar</BtnPrimary>
+              </div>
+              <label style={{display:"flex",alignItems:"center",gap:8,marginBottom:16,cursor:"pointer",fontSize:13,color:"#374151"}}>
+                <input type="checkbox" checked={catRequerAfericao} onChange={e=>setCatRequerAfericao(e.target.checked)}/>
+                Ferramentas dessa categoria exigem controle de aferição
+              </label>
+              <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                {categorias.map(c=>(
+                  <div key={c.id} style={{padding:"10px 14px",background:"#fff",border:"1px solid #F1F5F9",borderRadius:10,
+                    display:"flex",alignItems:"center",justifyContent:"space-between",gap:10}}>
+                    <span style={{fontSize:13.5,fontWeight:600,color:"#111827"}}>{c.nome}</span>
+                    {c.requer_afericao&&<span style={{fontSize:11,fontWeight:700,color:"#D97706",background:"#FFFBEB",
+                      padding:"3px 9px",borderRadius:99,whiteSpace:"nowrap"}}>Exige aferição</span>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </>)}
+
         </div>
       </div>
     </div>
@@ -2042,6 +2102,7 @@ function App(){
   const[status,setStatus]=useState(_RESET_TOKEN?"reset_password":"loading");
   const[profile,setProfile]=useState(null);
   const[filiais,setFiliais]=useState([]);
+  const[categorias,setCategorias]=useState([]);
   const[pessoas,setPessoas]=useState([]);
   const[activeNav,setActiveNav]=useState(null);
   const[configSection,setConfigSection]=useState("perfil");
@@ -2054,6 +2115,10 @@ function App(){
   async function loadFiliais(){
     const{data}=await supabase.from("filiais").select("*").eq("ativo",true).order("nome");
     setFiliais(data||[]);
+  }
+  async function loadCategorias(){
+    const{data}=await supabase.from("categorias_ferramenta").select("*").eq("ativo",true).order("nome");
+    setCategorias(data||[]);
   }
   async function loadPessoas(){
     const{data}=await supabase.from("profiles").select("id,name,filial_id").eq("is_active",true).order("name");
@@ -2076,7 +2141,7 @@ function App(){
       filialId:prof.filial_id,filialNome:prof.filial?.nome,color:prof.color,
     });
     setActiveNav(prof.user_type==="colaborador"?"ferramentas":"dashboard");
-    await Promise.all([loadFiliais(),loadPessoas(),loadNotifications(prof.id)]);
+    await Promise.all([loadFiliais(),loadCategorias(),loadPessoas(),loadNotifications(prof.id)]);
     setStatus("ready");
   }
 
@@ -2109,7 +2174,7 @@ function App(){
     setNotifications(prev=>prev.map(n=>({...n,is_read:true})));
   };
 
-  const commonProps={profile,filiais,pessoas};
+  const commonProps={profile,filiais,categorias,pessoas};
   let content=null;
   if(viewingProfile){
     content=<div style={{padding:isMobile?"20px 16px":"28px 32px"}}>
@@ -2127,7 +2192,7 @@ function App(){
       case "manutencoes": content=<ManutencoesView {...commonProps}/>; break;
       case "auditorias": content=<AuditoriasView {...commonProps}/>; break;
       case "relatorios": content=<RelatoriosView {...commonProps}/>; break;
-      case "configuracoes": content=<ConfiguracoesView {...commonProps} reloadFiliais={loadFiliais}
+      case "configuracoes": content=<ConfiguracoesView {...commonProps} reloadFiliais={loadFiliais} reloadCategorias={loadCategorias}
         activeSection={configSection} setActiveSection={setConfigSection}/>; break;
       default: content=null;
     }
