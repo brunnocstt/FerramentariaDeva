@@ -150,6 +150,18 @@ function diasEntre(d1,d2=new Date()){
   const a=new Date(d1),b=new Date(d2);
   return Math.floor((b-a)/86400000);
 }
+function fmtDuracao(iso){
+  if(!iso)return "—";
+  const ms=Date.now()-new Date(iso).getTime();
+  if(!(ms>=0))return "agora";
+  const min=Math.floor(ms/60000);
+  if(min<1)return "agora";
+  if(min<60)return `${min} min`;
+  const h=Math.floor(min/60);
+  if(h<24)return `${h}h${min%60?String(min%60).padStart(2,"0")+"min":""}`;
+  const dias=Math.floor(h/24);
+  return `${dias}d${h%24?(h%24)+"h":""}`;
+}
 
 const STATUS_FERRAMENTA_INFO={
   disponivel:{label:"Disponível",color:"#059669",bg:"#ECFDF5"},
@@ -754,6 +766,74 @@ function Sidebar({currentUser,activeNav,setActiveNav,onLogout,onViewProfile,
 /* ══════════════════════════════════════════════════════════════
    DASHBOARD
    ══════════════════════════════════════════════════════════════ */
+function UsoAoVivoPanel(){
+  const[unidades,setUnidades]=useState([]);
+  const[emprestimos,setEmprestimos]=useState([]);
+  const[loading,setLoading]=useState(true);
+  const[,setTick]=useState(0);
+
+  const load=useCallback(async()=>{
+    const[{data:dU},{data:dE}]=await Promise.all([
+      supabase.from("ferramentas_unidade")
+        .select("id,codigo,data_retirada_atual,catalogo:catalogo_id(nome),colaborador:colaborador_atual_id(name)")
+        .eq("status","com_colaborador").order("data_retirada_atual",{ascending:true}),
+      supabase.from("emprestimos")
+        .select("id,quantidade,data_retirada,estoque:estoque_id(catalogo:catalogo_id(nome)),colaborador:colaborador_id(name)")
+        .is("data_devolucao",null).order("data_retirada",{ascending:true}),
+    ]);
+    setUnidades(dU||[]);
+    setEmprestimos(dE||[]);
+    setLoading(false);
+  },[]);
+
+  useEffect(()=>{load();},[load]);
+
+  useEffect(()=>{
+    const ch=supabase.channel("uso-ao-vivo-rt")
+      .on("postgres_changes",{event:"*",schema:"public",table:"ferramentas_unidade"},()=>load())
+      .on("postgres_changes",{event:"*",schema:"public",table:"emprestimos"},()=>load())
+      .subscribe();
+    return()=>supabase.removeChannel(ch);
+  },[load]);
+
+  useEffect(()=>{
+    const t=setInterval(()=>setTick(n=>n+1),30000);
+    return()=>clearInterval(t);
+  },[]);
+
+  const itens=useMemo(()=>[
+    ...unidades.map(u=>({key:"u-"+u.id,colaborador:u.colaborador?.name,ferramenta:u.catalogo?.nome,detalhe:u.codigo,desde:u.data_retirada_atual})),
+    ...emprestimos.map(e=>({key:"e-"+e.id,colaborador:e.colaborador?.name,ferramenta:e.estoque?.catalogo?.nome,detalhe:`${e.quantidade}x`,desde:e.data_retirada})),
+  ].sort((a,b)=>new Date(a.desde)-new Date(b.desde)),[unidades,emprestimos]);
+
+  return(
+    <div style={{marginTop:14,background:"#fff",border:"1px solid #F1F5F9",borderRadius:14,padding:"18px 20px"}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12,flexWrap:"wrap",gap:6}}>
+        <h2 style={{fontSize:15,fontWeight:800,color:"#111827",margin:0}}>Ferramentas em Uso</h2>
+        <span style={{fontSize:11,color:"#9CA3AF"}}>{itens.length} em uso agora</span>
+      </div>
+      {loading?<div style={{padding:24,textAlign:"center"}}><Spinner size={18}/></div>:
+      itens.length===0?<EmptyState icon={PackageCheck} title="Nenhuma ferramenta com colaborador no momento"/>:(
+        <div style={{display:"flex",flexDirection:"column",gap:6}}>
+          {itens.map(it=>(
+            <div key={it.key} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 12px",
+              background:"#F9FAFB",borderRadius:9,flexWrap:"wrap",gap:6}}>
+              <div>
+                <span style={{fontSize:13.5,fontWeight:700,color:"#111827"}}>{it.ferramenta||"—"}</span>{" "}
+                <span style={{fontSize:11,color:"#9CA3AF"}}>{it.detalhe}</span>
+                <div style={{fontSize:11.5,color:"#6B7280"}}>com {it.colaborador||"—"}</div>
+              </div>
+              <span style={{fontSize:11.5,fontWeight:700,color:BLUE,background:"#EEF2FF",padding:"3px 9px",borderRadius:999,whiteSpace:"nowrap"}}>
+                há {fmtDuracao(it.desde)}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DashboardView({profile,filiais}){
   const[stats,setStats]=useState(null);
   const[loading,setLoading]=useState(true);
@@ -806,6 +886,7 @@ function DashboardView({profile,filiais}){
         <StatCard label="Aferições Vencidas" value={stats.vencidas} Icon={AlertCircle} color="#B91C1C"/>
         <StatCard label="Aferições Próx. 7 dias" value={stats.proximas} Icon={Calendar} color="#D97706"/>
       </div>
+      {profile.userType!=="colaborador"&&<UsoAoVivoPanel/>}
     </div>
   );
 }
