@@ -94,7 +94,7 @@ import{
   Lock,Mail,EyeOff,EyeIcon,Check,AlertCircle,RefreshCw,Building2,
   Clock,CheckCircle2,Pencil,Trash2,Menu,Filter,Wrench,PackageCheck,
   ClipboardList,ArrowLeftRight,Hash,MapPin,AlertTriangle,LayoutDashboard,
-  FileText,UserCheck,PackagePlus,PackageX,Ban,History,Tag
+  FileText,UserCheck,PackagePlus,PackageX,Ban,History,Tag,ScanLine
 }from "https://esm.sh/lucide-react?deps=react@18";
 
 /* ── SUPABASE ────────────────────────────────────── */
@@ -641,9 +641,11 @@ function Sidebar({currentUser,activeNav,setActiveNav,onLogout,onViewProfile,
   const isColaborador=ut==="colaborador";
 
   const nav=isColaborador?[
+    {id:"retiradas",label:"Retiradas",Icon:ScanLine},
     {id:"ferramentas",label:"Ferramentas",Icon:Wrench},
   ]:[
     {id:"dashboard",label:"Dashboard",Icon:LayoutDashboard},
+    {id:"retiradas",label:"Retiradas",Icon:ScanLine},
     {id:"ferramentas",label:"Ferramentas",Icon:Wrench},
     {id:"movimentacoes",label:"Movimentações",Icon:ArrowLeftRight},
     {id:"manutencoes",label:"Manutenções",Icon:PackageX},
@@ -1435,6 +1437,259 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
 }
 
 /* ══════════════════════════════════════════════════════════════
+   RETIRADAS — fluxo do ferramenteiro (leitor de crachá → matrícula)
+   ══════════════════════════════════════════════════════════════ */
+function RetiradaColaborador({colaborador,onVoltar}){
+  const[busca,setBusca]=useState("");
+  const[unidades,setUnidades]=useState([]);
+  const[estoques,setEstoques]=useState([]);
+  const[loading,setLoading]=useState(true);
+  const[processando,setProcessando]=useState(null);
+  const[error,setError]=useState("");
+  const[feitos,setFeitos]=useState([]);
+  const[qtdPool,setQtdPool]=useState({});
+
+  async function load(){
+    setLoading(true);
+    const[{data:dU},{data:dE},{data:emp}]=await Promise.all([
+      supabase.from("ferramentas_unidade").select("id,codigo,catalogo:catalogo_id(nome)").eq("filial_id",colaborador.filial_id).eq("status","disponivel").order("codigo"),
+      supabase.from("estoque_pool").select("*, catalogo:catalogo_id(nome)").eq("filial_id",colaborador.filial_id),
+      supabase.from("emprestimos").select("estoque_id,quantidade").is("data_devolucao",null),
+    ]);
+    setUnidades(dU||[]);
+    const empMap={};
+    (emp||[]).forEach(e=>{empMap[e.estoque_id]=(empMap[e.estoque_id]||0)+e.quantidade;});
+    setEstoques((dE||[]).map(e=>({...e,quantidade_disponivel:e.quantidade_total-(empMap[e.id]||0)})).filter(e=>e.quantidade_disponivel>0));
+    setLoading(false);
+  }
+  useEffect(()=>{load();},[colaborador.id]);
+
+  async function retirarUnidade(u){
+    setProcessando(u.id);setError("");
+    const{error:err}=await supabase.from("movimentacoes").insert({ferramenta_id:u.id,tipo:"retirada",pessoa_responsavel_id:colaborador.id});
+    setProcessando(null);
+    if(err){setError(err.message||"Não foi possível registrar.");return;}
+    setFeitos(prev=>[...prev,`${u.codigo} — ${u.catalogo?.nome}`]);
+    load();
+  }
+  async function retirarPool(e){
+    const qtd=parseInt(qtdPool[e.id]||1,10);
+    if(!qtd||qtd<=0)return;
+    setProcessando(e.id);setError("");
+    const{error:err}=await supabase.from("emprestimos").insert({estoque_id:e.id,colaborador_id:colaborador.id,quantidade:qtd});
+    setProcessando(null);
+    if(err){setError(err.message||"Não foi possível registrar.");return;}
+    setFeitos(prev=>[...prev,`${qtd}x ${e.catalogo?.nome}`]);
+    setQtdPool(prev=>({...prev,[e.id]:1}));
+    load();
+  }
+
+  const t=busca.trim().toLowerCase();
+  const unidadesF=unidades.filter(u=>!t||u.codigo.toLowerCase().includes(t)||(u.catalogo?.nome||"").toLowerCase().includes(t));
+  const estoquesF=estoques.filter(e=>!t||(e.catalogo?.nome||"").toLowerCase().includes(t));
+
+  return(
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,padding:14,
+        background:"#EEF2FF",borderRadius:12,border:"1px solid #C7D2FE",flexWrap:"wrap",gap:10}}>
+        <div>
+          <div style={{fontSize:11,color:BLUE,fontWeight:700,textTransform:"uppercase"}}>Retirando para</div>
+          <div style={{fontSize:16,fontWeight:800,color:"#111827"}}>{colaborador.name}</div>
+        </div>
+        <BtnSecondary onClick={onVoltar}>Trocar colaborador</BtnSecondary>
+      </div>
+      <ErrorBox>{error}</ErrorBox>
+      {feitos.length>0&&(
+        <div style={{marginBottom:16,padding:12,borderRadius:10,background:"#ECFDF5",border:"1px solid #A7F3D0"}}>
+          <div style={{fontSize:12,fontWeight:700,color:"#059669",marginBottom:4}}>Retirado agora:</div>
+          {feitos.map((f,i)=><div key={i} style={{fontSize:13,color:"#065F46"}}>✓ {f}</div>)}
+        </div>
+      )}
+      <input value={busca} onChange={e=>setBusca(e.target.value)} placeholder="Buscar ferramenta..." style={{...inputStyle,marginBottom:14}}/>
+      {loading?<div style={{padding:40,textAlign:"center"}}><Spinner size={20}/></div>:
+      (unidadesF.length===0&&estoquesF.length===0)?<EmptyState icon={Wrench} title="Nenhuma ferramenta disponível nessa filial"/>:(
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>
+          {unidadesF.map(u=>(
+            <div key={u.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",
+              background:"#fff",border:"1px solid #F1F5F9",borderRadius:10,flexWrap:"wrap",gap:8}}>
+              <div>
+                <span style={{fontSize:11,color:"#9CA3AF",fontWeight:700}}>{u.codigo}</span>{" "}
+                <span style={{fontSize:13.5,fontWeight:700,color:"#111827"}}>{u.catalogo?.nome}</span>
+              </div>
+              <BtnPrimary onClick={()=>retirarUnidade(u)} loading={processando===u.id}>Retirar</BtnPrimary>
+            </div>
+          ))}
+          {estoquesF.map(e=>(
+            <div key={e.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",
+              background:"#fff",border:"1px solid #F1F5F9",borderRadius:10,flexWrap:"wrap",gap:8}}>
+              <div>
+                <span style={{fontSize:13.5,fontWeight:700,color:"#111827"}}>{e.catalogo?.nome}</span>{" "}
+                <span style={{fontSize:11,color:"#9CA3AF"}}>({e.quantidade_disponivel} disponível)</span>
+              </div>
+              <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                <input type="number" min="1" max={e.quantidade_disponivel} value={qtdPool[e.id]??1}
+                  onChange={ev=>setQtdPool(prev=>({...prev,[e.id]:ev.target.value}))}
+                  style={{...inputStyle,width:60,padding:"8px"}}/>
+                <BtnPrimary onClick={()=>retirarPool(e)} loading={processando===e.id}>Retirar</BtnPrimary>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DevolucaoColaborador({colaborador,onVoltar}){
+  const[unidades,setUnidades]=useState([]);
+  const[emprestimos,setEmprestimos]=useState([]);
+  const[loading,setLoading]=useState(true);
+  const[processando,setProcessando]=useState(null);
+  const[error,setError]=useState("");
+  const[feitos,setFeitos]=useState([]);
+
+  async function load(){
+    setLoading(true);
+    const[{data:dU},{data:dE}]=await Promise.all([
+      supabase.from("ferramentas_unidade").select("id,codigo,data_retirada_atual,catalogo:catalogo_id(nome)")
+        .eq("colaborador_atual_id",colaborador.id).eq("status","com_colaborador"),
+      supabase.from("emprestimos").select("*, estoque:estoque_id(catalogo:catalogo_id(nome))")
+        .eq("colaborador_id",colaborador.id).is("data_devolucao",null),
+    ]);
+    setUnidades(dU||[]);
+    setEmprestimos(dE||[]);
+    setLoading(false);
+  }
+  useEffect(()=>{load();},[colaborador.id]);
+
+  async function devolverUnidade(u){
+    setProcessando(u.id);setError("");
+    const{error:err}=await supabase.from("movimentacoes").insert({ferramenta_id:u.id,tipo:"devolucao"});
+    setProcessando(null);
+    if(err){setError(err.message||"Não foi possível registrar.");return;}
+    setFeitos(prev=>[...prev,`${u.codigo} — ${u.catalogo?.nome}`]);
+    load();
+  }
+  async function devolverEmprestimo(e){
+    setProcessando(e.id);setError("");
+    const{error:err}=await supabase.from("emprestimos").update({data_devolucao:new Date().toISOString()}).eq("id",e.id);
+    setProcessando(null);
+    if(err){setError(err.message||"Não foi possível registrar.");return;}
+    setFeitos(prev=>[...prev,`${e.quantidade}x ${e.estoque?.catalogo?.nome}`]);
+    load();
+  }
+
+  const nada=unidades.length===0&&emprestimos.length===0;
+
+  return(
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,padding:14,
+        background:"#EEF2FF",borderRadius:12,border:"1px solid #C7D2FE",flexWrap:"wrap",gap:10}}>
+        <div>
+          <div style={{fontSize:11,color:BLUE,fontWeight:700,textTransform:"uppercase"}}>Devolvendo de</div>
+          <div style={{fontSize:16,fontWeight:800,color:"#111827"}}>{colaborador.name}</div>
+        </div>
+        <BtnSecondary onClick={onVoltar}>Trocar colaborador</BtnSecondary>
+      </div>
+      <ErrorBox>{error}</ErrorBox>
+      {feitos.length>0&&(
+        <div style={{marginBottom:16,padding:12,borderRadius:10,background:"#ECFDF5",border:"1px solid #A7F3D0"}}>
+          <div style={{fontSize:12,fontWeight:700,color:"#059669",marginBottom:4}}>Devolvido agora:</div>
+          {feitos.map((f,i)=><div key={i} style={{fontSize:13,color:"#065F46"}}>✓ {f}</div>)}
+        </div>
+      )}
+      {loading?<div style={{padding:40,textAlign:"center"}}><Spinner size={20}/></div>:
+      nada?<EmptyState icon={PackageCheck} title="Nada emprestado com esse colaborador no momento"/>:(
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>
+          {unidades.map(u=>(
+            <div key={u.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",
+              background:"#fff",border:"1px solid #F1F5F9",borderRadius:10,flexWrap:"wrap",gap:8}}>
+              <div>
+                <span style={{fontSize:11,color:"#9CA3AF",fontWeight:700}}>{u.codigo}</span>{" "}
+                <span style={{fontSize:13.5,fontWeight:700,color:"#111827"}}>{u.catalogo?.nome}</span>
+                <div style={{fontSize:11,color:"#9CA3AF"}}>Desde {fmtDateTime(u.data_retirada_atual)}</div>
+              </div>
+              <BtnPrimary onClick={()=>devolverUnidade(u)} loading={processando===u.id}>Devolver</BtnPrimary>
+            </div>
+          ))}
+          {emprestimos.map(e=>(
+            <div key={e.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",
+              background:"#fff",border:"1px solid #F1F5F9",borderRadius:10,flexWrap:"wrap",gap:8}}>
+              <div>
+                <span style={{fontSize:13.5,fontWeight:700,color:"#111827"}}>{e.quantidade}x {e.estoque?.catalogo?.nome}</span>
+                <div style={{fontSize:11,color:"#9CA3AF"}}>Desde {fmtDateTime(e.data_retirada)}</div>
+              </div>
+              <BtnPrimary onClick={()=>devolverEmprestimo(e)} loading={processando===e.id}>Devolver</BtnPrimary>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RetiradasView(){
+  const isMobile=useIsMobile();
+  const[modo,setModo]=useState("retirar");
+  const[matricula,setMatricula]=useState("");
+  const[colaborador,setColaborador]=useState(null);
+  const[buscando,setBuscando]=useState(false);
+  const[erro,setErro]=useState("");
+  const matriculaRef=useRef(null);
+
+  useEffect(()=>{ if(!colaborador)matriculaRef.current?.focus(); },[colaborador,modo]);
+
+  async function buscar(e){
+    e.preventDefault();
+    if(!matricula.trim())return;
+    setBuscando(true);setErro("");
+    const{data,error}=await supabase.from("profiles").select("id,name,filial_id,matricula")
+      .eq("matricula",matricula.trim()).eq("is_active",true).maybeSingle();
+    setBuscando(false);
+    if(error||!data){setErro("Matrícula não encontrada ou colaborador inativo.");return;}
+    setColaborador(data);
+  }
+  function limpar(){
+    setColaborador(null);setMatricula("");setErro("");
+  }
+
+  return(
+    <div className="fade" style={{padding:isMobile?"20px 16px":"28px 32px"}}>
+      <h1 style={{fontSize:22,fontWeight:800,color:"#111827",margin:"0 0 4px"}}>Retiradas</h1>
+      <p style={{fontSize:13,color:"#6B7280",margin:"0 0 20px"}}>Leia o crachá do colaborador ou digite a matrícula.</p>
+
+      <div style={{display:"flex",gap:8,marginBottom:20}}>
+        <button onClick={()=>{setModo("retirar");limpar();}} style={{padding:"8px 16px",borderRadius:9,border:"none",
+          background:modo==="retirar"?BLUE:"#F3F4F6",color:modo==="retirar"?"#fff":"#374151",fontWeight:700,fontSize:13,cursor:"pointer"}}>
+          Retirar Ferramenta
+        </button>
+        <button onClick={()=>{setModo("devolver");limpar();}} style={{padding:"8px 16px",borderRadius:9,border:"none",
+          background:modo==="devolver"?BLUE:"#F3F4F6",color:modo==="devolver"?"#fff":"#374151",fontWeight:700,fontSize:13,cursor:"pointer"}}>
+          Devolver Ferramenta
+        </button>
+      </div>
+
+      {!colaborador?(
+        <div style={{maxWidth:420}}>
+          <form onSubmit={buscar} style={{display:"flex",flexDirection:"column",gap:14}}>
+            <ErrorBox>{erro}</ErrorBox>
+            <Field label="Matrícula do colaborador" hint="Passe o crachá no leitor (ele digita e envia sozinho) ou digite e aperte Enter.">
+              <input ref={matriculaRef} value={matricula} onChange={e=>setMatricula(e.target.value)} autoFocus
+                style={{...inputStyle,fontSize:20,padding:"16px 14px",textAlign:"center",letterSpacing:"2px"}} placeholder="000000"/>
+            </Field>
+            <BtnPrimary type="submit" loading={buscando}><ScanLine size={16}/>Buscar</BtnPrimary>
+          </form>
+        </div>
+      ):(
+        modo==="retirar"
+          ?<RetiradaColaborador colaborador={colaborador} onVoltar={limpar}/>
+          :<DevolucaoColaborador colaborador={colaborador} onVoltar={limpar}/>
+      )}
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════
    MOVIMENTAÇÕES
    ══════════════════════════════════════════════════════════════ */
 function MovimentacoesView({profile,filiais}){
@@ -1892,6 +2147,7 @@ function SenhaTemporariaModal({info,onClose}){
 function ModalUsuario({onClose,onSaved,filiais,profile,editando}){
   const[name,setName]=useState(editando?.name||"");
   const[email,setEmail]=useState(editando?.email||"");
+  const[matricula,setMatricula]=useState(editando?.matricula||"");
   const[userType,setUserType]=useState(editando?.user_type||"colaborador");
   const[filialId,setFilialId]=useState(editando?.filial_id||(profile.userType==="admin_area"?profile.filialId:""));
   const[loading,setLoading]=useState(false);
@@ -1910,8 +2166,11 @@ function ModalUsuario({onClose,onSaved,filiais,profile,editando}){
         body:JSON.stringify({user_id:editando.id,action:"update_profile",name,user_type:userType,filial_id:userType==="admin_geral"?null:filialId}),
       });
       const json=await resp.json();
+      if(!json.ok){setLoading(false);setError(json.error);return;}
+      // matrícula não faz parte da Edge Function — grava direto (RLS já permite admin editar perfis no escopo)
+      const{error:errMat}=await supabase.from("profiles").update({matricula:matricula.trim()||null}).eq("id",editando.id);
       setLoading(false);
-      if(!json.ok){setError(json.error);return;}
+      if(errMat){setError(traduzErro(errMat));return;}
       onSaved();
     }else{
       const resp=await fetch(`${SUPA_URL}/functions/v1/admin-create-user`,{
@@ -1919,8 +2178,12 @@ function ModalUsuario({onClose,onSaved,filiais,profile,editando}){
         body:JSON.stringify({name,email,user_type:userType,filial_id:userType==="admin_geral"?null:filialId}),
       });
       const json=await resp.json();
+      if(!json.ok){setLoading(false);setError(json.error);return;}
+      if(matricula.trim()){
+        const{error:errMat}=await supabase.from("profiles").update({matricula:matricula.trim()}).eq("id",json.user.id);
+        if(errMat){setLoading(false);setError("Usuário criado, mas falhou ao salvar a matrícula: "+traduzErro(errMat));return;}
+      }
       setLoading(false);
-      if(!json.ok){setError(json.error);return;}
       setResultado(json);
     }
   }
@@ -1938,6 +2201,9 @@ function ModalUsuario({onClose,onSaved,filiais,profile,editando}){
         </Field>
         <Field label="E-mail" required>
           <input type="email" value={email} onChange={e=>setEmail(e.target.value)} style={inputStyle} disabled={!!editando}/>
+        </Field>
+        <Field label="Matrícula" hint="Número lido pelo leitor de código de barras do crachá, usado na tela de Retiradas.">
+          <input value={matricula} onChange={e=>setMatricula(e.target.value)} style={inputStyle} placeholder="Ex.: 00123"/>
         </Field>
         <Field label="Tipo de usuário" required>
           <select value={userType} onChange={e=>setUserType(e.target.value)} style={inputStyle}>
@@ -2028,6 +2294,7 @@ function GestaoUsuariosView({profile,filiais}){
               </div>
               <div style={{fontSize:12,color:"#374151",minWidth:150}}>{USER_TYPE_LABEL[u.user_type]}</div>
               <div style={{fontSize:12,color:"#6B7280",minWidth:120}}>{u.filial?.nome||"Todas as filiais"}</div>
+              <div style={{fontSize:12,color:"#9CA3AF",minWidth:90}}>{u.matricula?`Mat. ${u.matricula}`:"—"}</div>
               <div style={{display:"flex",gap:6}}>
                 <button onClick={()=>setEditando(u)} title="Editar" style={{border:"1px solid #E5E7EB",background:"#fff",
                   borderRadius:8,width:30,height:30,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",color:"#6B7280"}}>
@@ -2374,7 +2641,7 @@ function App(){
       id:prof.id,name:prof.name,email:prof.email,userType:prof.user_type,
       filialId:prof.filial_id,filialNome:prof.filial?.nome,color:prof.color,
     });
-    setActiveNav(prof.user_type==="colaborador"?"ferramentas":"dashboard");
+    setActiveNav(prof.user_type==="colaborador"?"retiradas":"dashboard");
     await Promise.all([loadFiliais(),loadCategorias(),loadCatalogos(),loadPessoas(),loadNotifications(prof.id)]);
     setStatus("ready");
   }
@@ -2421,6 +2688,7 @@ function App(){
   }else{
     switch(activeNav){
       case "dashboard": content=<DashboardView {...commonProps}/>; break;
+      case "retiradas": content=<RetiradasView/>; break;
       case "ferramentas": content=<FerramentasView {...commonProps} reloadCatalogos={loadCatalogos}/>; break;
       case "movimentacoes": content=<MovimentacoesView {...commonProps}/>; break;
       case "manutencoes": content=<ManutencoesView {...commonProps}/>; break;
