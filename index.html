@@ -86,6 +86,7 @@
 <script type="text/babel" data-type="module">
 import React,{useState,useMemo,useEffect,useRef,useCallback}from "https://esm.sh/react@18";
 import{createRoot}from "https://esm.sh/react-dom@18/client?deps=react@18";
+import{createPortal}from "https://esm.sh/react-dom@18?deps=react@18";
 import{createClient}from "https://esm.sh/@supabase/supabase-js@2";
 import{
   BarChart3,Settings,Search,Plus,Calendar,ChevronRight,Bell,Users,
@@ -560,24 +561,37 @@ function NotificationPanel({notifications,onMarkRead,onMarkAllRead,onClose,flip}
 
 function UserFooterMenu({currentUser,collapsed,onViewProfile,onLogout}){
   const[open,setOpen]=useState(false);
-  const btnRef=useRef(null);
+  const[pos,setPos]=useState({left:0,bottom:0});
+  const wrapRef=useRef(null);
   const popRef=useRef(null);
   useEffect(()=>{
     if(!open)return;
     function onDoc(e){
       if(popRef.current&&popRef.current.contains(e.target))return;
-      if(btnRef.current&&btnRef.current.contains(e.target))return;
+      if(wrapRef.current&&wrapRef.current.contains(e.target))return;
       setOpen(false);
     }
     document.addEventListener("mousedown",onDoc);
     return()=>document.removeEventListener("mousedown",onDoc);
   },[open]);
+
+  // Posição calculada em pixels de tela (não relativa ao menu lateral) — o pop-up é
+  // renderizado via Portal direto no <body>, então não fica cortado pelo overflow:hidden
+  // do <aside> quando o menu está recolhido ou a lista é maior que a área visível.
+  function toggle(){
+    if(!open&&wrapRef.current){
+      const r=wrapRef.current.getBoundingClientRect();
+      setPos({left:r.left+8,bottom:window.innerHeight-r.top+8});
+    }
+    setOpen(v=>!v);
+  }
+
   return(
-    <div style={{padding:8,borderTop:"1px solid rgba(255,255,255,.07)",position:"relative"}}>
-      <button ref={btnRef} onClick={()=>setOpen(v=>!v)}
+    <div ref={wrapRef} style={{padding:8,borderTop:"1px solid rgba(255,255,255,.07)",position:"relative"}}>
+      <button onClick={toggle}
         style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"8px",borderRadius:9,
           border:"none",background:open?"#18181B":"transparent",cursor:"pointer",textAlign:"left"}}>
-        <div style={{width:30,height:30,borderRadius:9,background:currentUser.color||BLUE,flexShrink:0,
+        <div style={{width:30,height:30,borderRadius:"50%",background:currentUser.color||BLUE,flexShrink:0,
           display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:800,color:"#fff"}}>
           {getInitials(currentUser.name)}
         </div>
@@ -588,8 +602,8 @@ function UserFooterMenu({currentUser,collapsed,onViewProfile,onLogout}){
           </div>
         )}
       </button>
-      {open&&(
-        <div ref={popRef} className="up" style={{position:"absolute",left:8,bottom:56,width:220,background:"#18181B",
+      {open&&createPortal(
+        <div ref={popRef} className="up" style={{position:"fixed",left:pos.left,bottom:pos.bottom,width:220,background:"#18181B",
           borderRadius:12,border:"1px solid rgba(255,255,255,.08)",boxShadow:"0 16px 40px rgba(0,0,0,.4)",
           padding:6,zIndex:1200}}>
           <button onClick={()=>{onViewProfile();setOpen(false);}}
@@ -606,7 +620,8 @@ function UserFooterMenu({currentUser,collapsed,onViewProfile,onLogout}){
             onMouseLeave={e=>{e.currentTarget.style.background="transparent";e.currentTarget.style.color="#D4D4D8";}}>
             <LogOut size={14}/>Sair
           </button>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
