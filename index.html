@@ -632,7 +632,6 @@ function Sidebar({currentUser,activeNav,setActiveNav,onLogout,onViewProfile,
     {id:"movimentacoes",label:"Movimentações",Icon:ArrowLeftRight},
     {id:"manutencoes",label:"Manutenções",Icon:PackageX},
     {id:"auditorias",label:"Auditorias",Icon:ClipboardList},
-    {id:"usuarios",label:"Gestão de Usuários",Icon:UserPlus},
     {id:"relatorios",label:"Relatórios",Icon:BarChart3},
     {id:"configuracoes",label:"Configurações",Icon:Settings},
   ];
@@ -1698,7 +1697,6 @@ function ModalUsuario({onClose,onSaved,filiais,profile,editando}){
 }
 
 function GestaoUsuariosView({profile,filiais}){
-  const isMobile=useIsMobile();
   const[lista,setLista]=useState([]);
   const[loading,setLoading]=useState(true);
   const[novoAberto,setNovoAberto]=useState(false);
@@ -1743,11 +1741,11 @@ function GestaoUsuariosView({profile,filiais}){
   const USER_TYPE_LABEL={admin_geral:"Administrador Geral",admin_area:"Administrador de Filial",colaborador:"Colaborador"};
 
   return(
-    <div className="fade" style={{padding:isMobile?"20px 16px":"28px 32px",maxWidth:1100}}>
-      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:20,flexWrap:"wrap",gap:12}}>
+    <>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16,flexWrap:"wrap",gap:12}}>
         <div>
-          <h1 style={{fontSize:22,fontWeight:800,color:"#111827",margin:"0 0 4px"}}>Gestão de Usuários</h1>
-          <p style={{fontSize:13,color:"#6B7280",margin:0}}>{lista.length} usuário(s)</p>
+          <p style={{fontSize:15,fontWeight:800,color:"#111827",margin:0}}>Gestão de Usuários</p>
+          <p style={{fontSize:12,color:"#9CA3AF",marginTop:2}}>{lista.length} usuário(s)</p>
         </div>
         <BtnPrimary onClick={()=>setNovoAberto(true)}><UserPlus size={15}/>Novo Usuário</BtnPrimary>
       </div>
@@ -1800,7 +1798,7 @@ function GestaoUsuariosView({profile,filiais}){
           <p style={{fontSize:12,color:"#9CA3AF",marginTop:10}}>Repasse esta senha ao usuário por um canal seguro. Ela não será exibida novamente.</p>
         </Modal>
       )}
-    </div>
+    </>
   );
 }
 
@@ -1922,9 +1920,8 @@ function MeuPerfilCard({profile}){
   );
 }
 
-function ConfiguracoesView({profile,filiais,reloadFiliais}){
+function ConfiguracoesView({profile,filiais,pessoas,reloadFiliais,activeSection,setActiveSection}){
   const isMobile=useIsMobile();
-  const[aba,setAba]=useState("perfil");
   const[novoNome,setNovoNome]=useState("");
   const[loading,setLoading]=useState(false);
   const[error,setError]=useState("");
@@ -1939,37 +1936,85 @@ function ConfiguracoesView({profile,filiais,reloadFiliais}){
     setNovoNome("");reloadFiliais();
   }
 
+  const SECTIONS=[
+    {id:"perfil",label:"Meu Perfil",Icon:UserCheck},
+    {id:"usuarios",label:"Gestão de Usuários",Icon:UserPlus},
+    ...(isAdminGeral?[{id:"filiais",label:"Filiais",Icon:Building2}]:[]),
+  ];
+
   return(
-    <div className="fade" style={{padding:isMobile?"20px 16px":"28px 32px",maxWidth:1000}}>
-      <h1 style={{fontSize:22,fontWeight:800,color:"#111827",margin:"0 0 20px"}}>Configurações</h1>
-      <div style={{display:"flex",gap:8,marginBottom:22}}>
-        <button onClick={()=>setAba("perfil")} style={{padding:"8px 16px",borderRadius:9,border:"none",
-          background:aba==="perfil"?BLUE:"#F3F4F6",color:aba==="perfil"?"#fff":"#374151",fontWeight:700,fontSize:13,cursor:"pointer"}}>
-          Meu Perfil
-        </button>
-        {isAdminGeral&&<button onClick={()=>setAba("filiais")} style={{padding:"8px 16px",borderRadius:9,border:"none",
-          background:aba==="filiais"?BLUE:"#F3F4F6",color:aba==="filiais"?"#fff":"#374151",fontWeight:700,fontSize:13,cursor:"pointer"}}>
-          Filiais
-        </button>}
+    <div className="fade" style={{padding:isMobile?"20px 16px":"28px 32px",maxWidth:1100}}>
+      <div style={{marginBottom:24}}>
+        <h1 style={{fontSize:20,fontWeight:800,color:"#111827",margin:0}}>Configurações</h1>
+        <p style={{fontSize:13,color:"#9CA3AF",marginTop:3}}>Gerencie configurações do sistema</p>
       </div>
-      {aba==="perfil"&&<MeuPerfilCard profile={profile}/>}
-      {aba==="filiais"&&isAdminGeral&&(
-        <div style={{maxWidth:440}}>
-          <ErrorBox>{error}</ErrorBox>
-          <div style={{display:"flex",gap:8,marginBottom:16}}>
-            <input value={novoNome} onChange={e=>setNovoNome(e.target.value)} style={inputStyle} placeholder="Nome da nova filial"/>
-            <BtnPrimary onClick={addFilial} loading={loading}>Adicionar</BtnPrimary>
-          </div>
-          <div style={{display:"flex",flexDirection:"column",gap:8}}>
-            {filiais.map(f=>(
-              <div key={f.id} style={{padding:"10px 14px",background:"#fff",border:"1px solid #F1F5F9",borderRadius:10,
-                fontSize:13.5,fontWeight:600,color:"#111827"}}>
-                {f.nome}
-              </div>
-            ))}
-          </div>
+
+      <div style={{display:"flex",gap:isMobile?14:20,alignItems:"flex-start",flexDirection:isMobile?"column":"row"}}>
+
+        {SECTIONS.length>1&&(
+        <div style={isMobile
+          ?{width:"100%",display:"flex",gap:8}
+          :{width:210,flexShrink:0,background:"#fff",borderRadius:14,
+            border:"1px solid #F1F5F9",boxShadow:"0 1px 4px rgba(0,0,0,.04)",padding:8}}>
+          {!isMobile&&(
+            <p style={{fontSize:10,fontWeight:700,color:"#94A3B8",textTransform:"uppercase",
+              letterSpacing:".07em",padding:"6px 10px 4px"}}>Configurações</p>
+          )}
+          {SECTIONS.map(s=>{
+            const active=activeSection===s.id;
+            return(
+              <button key={s.id} onClick={()=>setActiveSection(s.id)}
+                style={isMobile
+                  ?{flex:1,display:"flex",alignItems:"center",justifyContent:"center",gap:7,padding:"10px 8px",
+                    borderRadius:11,cursor:"pointer",
+                    border:`1.5px solid ${active?BLUE:"#E5E7EB"}`,
+                    background:active?`${BLUE}10`:"#fff",
+                    color:active?BLUE:"#6B7280",fontWeight:700,fontSize:13,transition:"all .15s"}
+                  :{width:"100%",display:"flex",alignItems:"center",gap:9,padding:"9px 12px",
+                    borderRadius:10,border:"none",cursor:"pointer",textAlign:"left",
+                    background:active?`${BLUE}10`:"transparent",
+                    color:active?BLUE:"#374151",fontWeight:active?700:500,fontSize:13,
+                    transition:"all .15s"}}>
+                <s.Icon size={15} color={active?BLUE:"#9CA3AF"}/>
+                {s.label}
+              </button>
+            );
+          })}
         </div>
-      )}
+        )}
+
+        <div style={{flex:1,minWidth:0}}>
+
+          {activeSection==="perfil"&&(
+            <MeuPerfilCard profile={profile}/>
+          )}
+
+          {activeSection==="usuarios"&&(
+            <GestaoUsuariosView profile={profile} filiais={filiais}/>
+          )}
+
+          {activeSection==="filiais"&&isAdminGeral&&(<>
+            <p style={{fontSize:15,fontWeight:800,color:"#111827",margin:"0 0 2px"}}>Filiais</p>
+            <p style={{fontSize:12,color:"#9CA3AF",margin:"0 0 16px"}}>Filiais com oficina cadastradas no sistema</p>
+            <div style={{maxWidth:440}}>
+              <ErrorBox>{error}</ErrorBox>
+              <div style={{display:"flex",gap:8,marginBottom:16}}>
+                <input value={novoNome} onChange={e=>setNovoNome(e.target.value)} style={inputStyle} placeholder="Nome da nova filial"/>
+                <BtnPrimary onClick={addFilial} loading={loading}>Adicionar</BtnPrimary>
+              </div>
+              <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                {filiais.map(f=>(
+                  <div key={f.id} style={{padding:"10px 14px",background:"#fff",border:"1px solid #F1F5F9",borderRadius:10,
+                    fontSize:13.5,fontWeight:600,color:"#111827"}}>
+                    {f.nome}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </>)}
+
+        </div>
+      </div>
     </div>
   );
 }
@@ -1983,6 +2028,7 @@ function App(){
   const[filiais,setFiliais]=useState([]);
   const[pessoas,setPessoas]=useState([]);
   const[activeNav,setActiveNav]=useState(null);
+  const[configSection,setConfigSection]=useState("perfil");
   const[notifications,setNotifications]=useState([]);
   const[notifOpen,setNotifOpen]=useState(false);
   const[drawerOpen,setDrawerOpen]=useState(false);
@@ -2064,9 +2110,9 @@ function App(){
       case "movimentacoes": content=<MovimentacoesView {...commonProps}/>; break;
       case "manutencoes": content=<ManutencoesView {...commonProps}/>; break;
       case "auditorias": content=<AuditoriasView {...commonProps}/>; break;
-      case "usuarios": content=<GestaoUsuariosView {...commonProps}/>; break;
       case "relatorios": content=<RelatoriosView {...commonProps}/>; break;
-      case "configuracoes": content=<ConfiguracoesView {...commonProps} reloadFiliais={loadFiliais}/>; break;
+      case "configuracoes": content=<ConfiguracoesView {...commonProps} reloadFiliais={loadFiliais}
+        activeSection={configSection} setActiveSection={setConfigSection}/>; break;
       default: content=null;
     }
   }
