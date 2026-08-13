@@ -771,7 +771,7 @@ function DashboardView({profile,filiais}){
   if(!stats)return null;
 
   return(
-    <div className="fade" style={{padding:"28px 32px",maxWidth:1200}}>
+    <div className="fade" style={{padding:"28px 32px"}}>
       <h1 style={{fontSize:22,fontWeight:800,color:"#111827",margin:"0 0 4px"}}>Dashboard</h1>
       <p style={{fontSize:13,color:"#6B7280",margin:"0 0 24px"}}>
         Visão geral {profile.userType==="admin_geral"?"de todas as filiais":`da filial ${profile.filialNome}`}.
@@ -1086,7 +1086,7 @@ function FerramentasView({profile,filiais,pessoas}){
   },[pessoas,selecionada]);
 
   return(
-    <div className="fade" style={{padding:isMobile?"20px 16px":"28px 32px",maxWidth:1200}}>
+    <div className="fade" style={{padding:isMobile?"20px 16px":"28px 32px"}}>
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:20,flexWrap:"wrap",gap:12}}>
         <div>
           <h1 style={{fontSize:22,fontWeight:800,color:"#111827",margin:"0 0 4px"}}>Ferramentas</h1>
@@ -1210,7 +1210,7 @@ function MovimentacoesView({profile,filiais}){
   }
 
   return(
-    <div className="fade" style={{padding:isMobile?"20px 16px":"28px 32px",maxWidth:1200}}>
+    <div className="fade" style={{padding:isMobile?"20px 16px":"28px 32px"}}>
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:20,flexWrap:"wrap",gap:12}}>
         <div>
           <h1 style={{fontSize:22,fontWeight:800,color:"#111827",margin:"0 0 4px"}}>Movimentações</h1>
@@ -1365,7 +1365,7 @@ function ManutencoesView({profile}){
   useEffect(()=>{load();},[profile.filialId]);
 
   return(
-    <div className="fade" style={{padding:isMobile?"20px 16px":"28px 32px",maxWidth:1200}}>
+    <div className="fade" style={{padding:isMobile?"20px 16px":"28px 32px"}}>
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:20,flexWrap:"wrap",gap:12}}>
         <div>
           <h1 style={{fontSize:22,fontWeight:800,color:"#111827",margin:"0 0 4px"}}>Manutenções</h1>
@@ -1492,7 +1492,7 @@ function AuditoriaExecucaoView({auditoria,onBack,onChanged}){
   }
 
   return(
-    <div className="fade" style={{padding:isMobile?"20px 16px":"28px 32px",maxWidth:1000}}>
+    <div className="fade" style={{padding:isMobile?"20px 16px":"28px 32px"}}>
       <button onClick={onBack} style={{display:"flex",alignItems:"center",gap:6,border:"none",background:"none",
         color:"#6B7280",fontSize:13,fontWeight:600,cursor:"pointer",padding:0,marginBottom:16}}>
         <ArrowLeft size={14}/>Voltar para Auditorias
@@ -1569,7 +1569,7 @@ function AuditoriasView({profile,filiais}){
   const STATUS_LABEL={nao_iniciada:{l:"Não Iniciada",c:"#6B7280",bg:"#F3F4F6"},em_andamento:{l:"Em Andamento",c:"#D97706",bg:"#FFFBEB"},concluida:{l:"Concluída",c:"#059669",bg:"#ECFDF5"}};
 
   return(
-    <div className="fade" style={{padding:isMobile?"20px 16px":"28px 32px",maxWidth:1000}}>
+    <div className="fade" style={{padding:isMobile?"20px 16px":"28px 32px"}}>
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:20,flexWrap:"wrap",gap:12}}>
         <div>
           <h1 style={{fontSize:22,fontWeight:800,color:"#111827",margin:"0 0 4px"}}>Auditorias</h1>
@@ -1832,7 +1832,7 @@ function RelatoriosView({profile,filiais}){
   }
 
   return(
-    <div className="fade" style={{padding:isMobile?"20px 16px":"28px 32px",maxWidth:1100}}>
+    <div className="fade" style={{padding:isMobile?"20px 16px":"28px 32px"}}>
       <h1 style={{fontSize:22,fontWeight:800,color:"#111827",margin:"0 0 4px"}}>Relatórios</h1>
       <p style={{fontSize:13,color:"#6B7280",margin:"0 0 24px"}}>Aferições vencidas e próximas do prazo.</p>
       {loading?<div style={{padding:60,textAlign:"center"}}><Spinner size={20}/></div>:(
@@ -1943,7 +1943,7 @@ function ConfiguracoesView({profile,filiais,pessoas,reloadFiliais,activeSection,
   ];
 
   return(
-    <div className="fade" style={{padding:isMobile?"20px 16px":"28px 32px",maxWidth:1100}}>
+    <div className="fade" style={{padding:isMobile?"20px 16px":"28px 32px"}}>
       <div style={{marginBottom:24}}>
         <h1 style={{fontSize:20,fontWeight:800,color:"#111827",margin:0}}>Configurações</h1>
         <p style={{fontSize:13,color:"#9CA3AF",marginTop:3}}>Gerencie configurações do sistema</p>
