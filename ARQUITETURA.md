@@ -1,8 +1,8 @@
 # Ferramentaria Deva — Arquitetura do Sistema
 
-> **Versão:** 1.0 — 07/08/2026
+> **Versão:** 2.0 — 13/08/2026 (Rodada 2: catálogo × estoque × empréstimos)
 > **Autor:** Albus Data
-> **URL de produção:** https://ferramentariadeva.albusdata.com.br (pendente configuração de DNS — ver seção 12)
+> **URL de produção:** https://ferramentariadeva.albusdata.com.br (pendente configuração de DNS — ver seção 15)
 
 ---
 
@@ -13,14 +13,16 @@
 3. [Diagrama Lógico](#3-diagrama-lógico)
 4. [Frontend](#4-frontend)
 5. [Banco de Dados](#5-banco-de-dados)
-6. [Perfis de Usuário e Permissões](#6-perfis-de-usuário-e-permissões)
-7. [Máquina de Estados das Ferramentas](#7-máquina-de-estados-das-ferramentas)
-8. [Edge Functions (API)](#8-edge-functions-api)
-9. [Auditorias](#9-auditorias)
-10. [Modelo de Segurança](#10-modelo-de-segurança)
-11. [Automação de Alertas](#11-automação-de-alertas)
-12. [Deploy e Infraestrutura](#12-deploy-e-infraestrutura)
-13. [Pendências Manuais](#13-pendências-manuais)
+6. [Catálogo × Estoque × Empréstimos](#6-catálogo--estoque--empréstimos)
+7. [Tela Retiradas e Painel em Tempo Real](#7-tela-retiradas-e-painel-em-tempo-real)
+8. [Perfis de Usuário e Permissões](#8-perfis-de-usuário-e-permissões)
+9. [Máquina de Estados das Ferramentas](#9-máquina-de-estados-das-ferramentas)
+10. [Edge Functions (API)](#10-edge-functions-api)
+11. [Auditorias](#11-auditorias)
+12. [Modelo de Segurança](#12-modelo-de-segurança)
+13. [Automação de Alertas](#13-automação-de-alertas)
+14. [Deploy e Infraestrutura](#14-deploy-e-infraestrutura)
+15. [Pendências Manuais](#15-pendências-manuais)
 
 ---
 
@@ -99,9 +101,10 @@ index.html
     ├── Primitivos    Field, Modal, BtnPrimary/Secondary, ErrorBox, EmptyState, StatCard, StatusBadge
     ├── Auth          LoginScreen (Turnstile), ResetPasswordScreen
     ├── Shell         Sidebar (idêntica ao app de Gestão de Projetos), UserFooterMenu, NotificationPanel
-    └── Views         DashboardView, FerramentasView, MovimentacoesView, ManutencoesView,
-                       AuditoriasView/AuditoriaExecucaoView, GestaoUsuariosView, RelatoriosView,
-                       ConfiguracoesView
+    └── Views         DashboardView (+ UsoAoVivoPanel), RetiradasView (RetiradaColaborador/
+                       DevolucaoColaborador), FerramentasView (catálogo + estoque),
+                       MovimentacoesView, ManutencoesView, AuditoriasView/AuditoriaExecucaoView,
+                       GestaoUsuariosView, RelatoriosView, ConfiguracoesView
 ```
 
 Reset de senha usa o mesmo padrão definitivo do app de referência: token customizado de 64 caracteres via `?reset_token=`, capturado **antes** de qualquer código Supabase rodar, independente do fluxo nativo `PASSWORD_RECOVERY` (incompatível com SPA sem build). Não existe `reset-password.html` separado neste app — o fluxo native de recovery link não é usado, só o token customizado.
@@ -115,27 +118,34 @@ Reset de senha usa o mesmo padrão definitivo do app de referência: token custo
 | Tabela | Descrição | RLS |
 |---|---|---|
 | `filiais` | As 6 filiais com oficina (Betim, Juiz de Fora, Montes Claros, Pouso Alegre, Divinópolis, Belo Horizonte) | ✅ |
-| `categorias_ferramenta` | Categorias de ferramenta (editável em Configurações), cada uma com flag `requer_afericao` | ✅ |
-| `profiles` | Perfil de cada usuário, vinculado a `auth.users` | ✅ |
-| `ferramentas` | Cadastro central de ferramentas | ✅ |
-| `movimentacoes` | Log **append-only** de toda ação sobre uma ferramenta | ✅ |
-| `manutencoes` | Registros de envio/retorno de conserto | ✅ |
+| `categorias_ferramenta` | Categorias de ferramenta (editável em Configurações), cada uma com flags `requer_afericao` e `controle_individual` | ✅ |
+| `profiles` | Perfil de cada usuário, vinculado a `auth.users`, com `matricula` (crachá) opcional | ✅ |
+| `ferramentas_catalogo` | Cadastro **global** de tipos/modelos de ferramenta (não tem filial) | ✅ |
+| `ferramentas_unidade` | Unidade física individual de um tipo do catálogo, numa filial, com código próprio | ✅ |
+| `estoque_pool` | Quantidade total de um tipo do catálogo numa filial, sem código individual | ✅ |
+| `emprestimos` | Retiradas/devoluções contra um `estoque_pool` (múltiplas simultâneas) | ✅ |
+| `movimentacoes` | Log **append-only** de toda ação sobre uma `ferramenta_unidade` | ✅ |
+| `manutencoes` | Registros de envio/retorno de conserto (só unidades individuais) | ✅ |
 | `auditorias_ferramentaria` | Cabeçalho de auditoria por filial | ✅ |
-| `auditoria_itens` | Checklist de cada ferramenta numa auditoria | ✅ |
+| `auditoria_itens` | Checklist de cada `ferramenta_unidade` numa auditoria | ✅ |
 | `notifications` | Notificações in-app por usuário | ✅ |
 | `password_reset_tokens` | Tokens de redefinição de senha (1h, sem acesso de cliente) | ✅ |
 
-### `ferramentas`
+> A tabela `ferramentas` da Rodada 1 (uma linha por unidade física, sem separar catálogo de estoque) foi **dropada** na Rodada 2 e substituída pelo modelo catálogo/unidade/pool descrito na seção 6 — ver justificativa lá.
+
+### `ferramentas_unidade`
 
 | Coluna | Tipo | Observação |
 |---|---|---|
-| `codigo` | text | Único por filial |
-| `categoria_id` | FK categorias_ferramenta | Determina se a ferramenta pede/mostra aferição (via `requer_afericao` da categoria) |
+| `catalogo_id` | FK ferramentas_catalogo | Define nome/categoria (não duplicados aqui) |
+| `filial_id` | FK filiais | Cada unidade pertence a uma filial |
+| `codigo` | text | Único, identifica a unidade física |
 | `status` | enum | `disponivel`\|`com_colaborador`\|`em_afericao`\|`em_conserto`\|`extraviada`\|`baixada` — **só mutável por trigger** |
 | `colaborador_atual_id` | FK profiles | Quem está com a ferramenta — **só mutável por trigger** |
-| `data_ultima_afericao`, `data_proxima_afericao`, `data_saida_afericao`, `data_retorno_afericao` | date | **Só mutáveis por trigger**; só fazem sentido pra ferramentas de categoria com `requer_afericao=true` |
+| `data_retirada_atual` | timestamptz | Gravada na retirada, limpa na devolução — alimenta o painel "há quanto tempo" (seção 7) |
+| `data_ultima_afericao`, `data_proxima_afericao`, `data_saida_afericao`, `data_retorno_afericao` | date | **Só mutáveis por trigger**; só fazem sentido pra categoria com `requer_afericao=true` |
 
-Reforço extra de defesa: `REVOKE UPDATE` + `GRANT UPDATE (nome, codigo, categoria_id, observacoes)` — as colunas operacionais não têm privilégio de UPDATE concedido ao papel `authenticated` em nível de coluna, então mesmo um bug de RLS não abriria brecha.
+Reforço extra de defesa: `REVOKE UPDATE` + `GRANT UPDATE` só nas colunas cadastrais (`codigo`, `observacoes`) — as colunas operacionais não têm privilégio de UPDATE concedido ao papel `authenticated` em nível de coluna, então mesmo um bug de RLS não abriria brecha.
 
 **Categoria controla a UI de aferição**: a tela de detalhe da ferramenta e o cadastro só mostram/pedem os campos de aferição (datas) e a ação "Enviar p/ Aferição" quando `categorias_ferramenta.requer_afericao` da categoria escolhida é `true`. Categorias seed: Ferramentas de medição, Equipamentos de elevação e Equipamentos de diagnóstico exigem aferição; as demais (manuais, pneumáticas, elétricas, especiais do fabricante, solda) não.
 
@@ -145,7 +155,46 @@ Reforço extra de defesa: `REVOKE UPDATE` + `GRANT UPDATE (nome, codigo, categor
 
 ---
 
-## 6. Perfis de Usuário e Permissões
+## 6. Catálogo × Estoque × Empréstimos
+
+Identificados 3 problemas reais no modelo da Rodada 1 (que tratava toda ferramenta como unidade física única, com um único dono por vez): (1) muitas ferramentas existem em várias unidades idênticas, sem serial próprio; (2) o mesmo tipo de ferramenta pode existir numa filial e não noutra — cadastro e estoque por filial são coisas distintas; (3) faltava um fluxo de entrega em tempo real pensado para leitor de código de barras.
+
+```
+ferramentas_catalogo  (global, 1 linha por "tipo/modelo" — sem filial)
+        │
+        ├── controle_individual = true  ──► ferramentas_unidade (1 linha por unidade física,
+        │                                    por filial, com código — igual à Rodada 1, mas
+        │                                    referenciando o catálogo em vez de nome embutido)
+        │
+        └── controle_individual = false ──► estoque_pool (1 linha por filial, só quantidade_total)
+                                             + emprestimos (retiradas/devoluções contra esse
+                                               estoque, várias simultâneas, sem "dono único")
+```
+
+`categorias_ferramenta.controle_individual` decide qual dos dois caminhos uma categoria segue. Categorias com `requer_afericao=true` são **obrigadas** a `controle_individual=true` — reforçado por `CHECK chk_afericao_exige_individual` (não dá pra calibrar "8 torquímetros" como um bloco só).
+
+`ferramentas_catalogo`: RLS de SELECT liberado a todo autenticado; INSERT/UPDATE só `admin_geral` (catálogo é compartilhado entre filiais, evita duplicidade tipo "Chave de Fenda" cadastrada duas vezes por admins de filiais diferentes).
+
+`estoque_pool` (`catalogo_id, filial_id, quantidade_total`, único por par): RLS escopada por filial, escrita por `admin_geral`/`admin_area` da própria filial. O modal "Nova Ferramenta" soma à `quantidade_total` existente em vez de duplicar a linha quando já há estoque daquele tipo na filial.
+
+`emprestimos` (`estoque_id, colaborador_id, quantidade, data_retirada, data_devolucao, registrado_por, observacao`): trigger `fn_valida_emprestimo` (BEFORE INSERT) bloqueia a retirada se `quantidade` pedida > saldo disponível (`quantidade_total` − soma dos empréstimos ainda sem devolução), com mensagem clara ("Não há saldo suficiente nesse estoque (disponível: N)."). `data_devolucao` só é alterável via UPDATE restrito por coluna (mesmo padrão de `REVOKE`/`GRANT` de `ferramentas_unidade`), e um segundo trigger (`fn_valida_devolucao_emprestimo`) impede devolver duas vezes o mesmo empréstimo.
+
+Fora de escopo (registrado para não ser esquecido, não implementado): auditoria de itens em pool (a tela de Auditorias cobre só `ferramentas_unidade`, que é o que faz sentido para um checklist item-a-item); extravio/conserto de item em pool — ajuste fica manual, admin corrige `quantidade_total` direto por enquanto.
+
+---
+
+## 7. Tela Retiradas e Painel em Tempo Real
+
+**Fluxo do ferramenteiro** (tela "Retiradas", primeira opção no menu de `colaborador`): o leitor de código de barras USB do crachá funciona como teclado — "digita" a matrícula e envia Enter sozinho, então basta um `<input>` de texto normal com `onSubmit` de formulário, sem integração especial. A matrícula resolve para `profiles.matricula`, mostrando o nome do colaborador para confirmar.
+
+- **Retirar**: lista as ferramentas disponíveis na filial do colaborador — unidades individuais livres e tipos em pool com saldo (com campo de quantidade). Ao confirmar, grava um INSERT em `movimentacoes` (tipo `retirada`, unidade individual) ou em `emprestimos` (pool).
+- **Devolver**: escolhe o colaborador **sem reler o crachá**, mostra tudo que está com ele (unidades + empréstimos em aberto) e devolve item a item — UPDATE em `movimentacoes`/`emprestimos` conforme o tipo.
+
+**Painel "Ferramentas em Uso" (Dashboard, `admin_geral`/`admin_area`)**: componente `UsoAoVivoPanel` lista ao vivo quem está com o quê e há quanto tempo (`data_retirada_atual` de `ferramentas_unidade` / `data_retirada` de `emprestimos`), com o texto "há Xmin/Xh/Xd" recalculado a cada 30s via `setInterval` local. Atualização **sem reload**: assina `supabase.channel(...).on("postgres_changes",{table:"ferramentas_unidade"|"emprestimos"},...)` — mesmo padrão usado para `demands-rt`/`notif-rt` no app de Gestão de Projetos. As tabelas `ferramentas_unidade`, `emprestimos` e `movimentacoes` estão habilitadas na publicação `supabase_realtime`. Testado com duas abas logadas simultaneamente: uma retirada/devolução numa aba reflete na outra sem qualquer ação manual.
+
+---
+
+## 8. Perfis de Usuário e Permissões
 
 | Tipo | Escopo |
 |---|---|
@@ -157,7 +206,7 @@ Usuário protegido: `bruno.cesar@deva.com.br` não pode ser desativado por ningu
 
 ---
 
-## 7. Máquina de Estados das Ferramentas
+## 9. Máquina de Estados das Ferramentas
 
 ```
                     disponivel
@@ -178,9 +227,11 @@ Usuário protegido: `bruno.cesar@deva.com.br` não pode ser desativado por ningu
 
 Cada seta é validada por `fn_valida_transicao_movimentacao` (BEFORE INSERT) e aplicada por `fn_aplicar_movimentacao` (AFTER INSERT). Envio/retorno de conserto passam pela tabela `manutencoes` (motivo, fornecedor, prazo) e replicam automaticamente uma `movimentacao` espelho para manter o histórico único — um sinalizador de sessão (`app.internal_write`) impede que o cliente insira esses dois tipos de movimentação diretamente, contornando o formulário estruturado de Manutenções.
 
+Essa máquina de estados vale só para `ferramentas_unidade` (individuais). Itens em pool têm uma máquina bem mais simples, própria de `emprestimos`: `retirada` (INSERT, validada por saldo) → `devolucao` (UPDATE de `data_devolucao`, validada contra devolução duplicada) — ver seção 6.
+
 ---
 
-## 8. Edge Functions (API)
+## 10. Edge Functions (API)
 
 Endpoint base: `https://zdwkdfsqxkcrnkovdvba.supabase.co/functions/v1/{slug}`
 
@@ -193,25 +244,25 @@ Endpoint base: `https://zdwkdfsqxkcrnkovdvba.supabase.co/functions/v1/{slug}`
 
 ---
 
-## 9. Auditorias
+## 11. Auditorias
 
 Fluxo simplificado (MVP): admin cria uma auditoria para uma filial → checklist com todas as ferramentas ativas dessa filial → marca cada uma como Encontrada / Não Encontrada / Danificada → ao avaliar 100%, finaliza. Sem geração de PDF nesta primeira versão (registrado como próxima leva, não implementado).
 
 ---
 
-## 10. Modelo de Segurança
+## 12. Modelo de Segurança
 
 Mesma defesa em profundidade de 4 camadas do app de Gestão de Projetos: UX (Camada 4) → Edge Functions validam JWT+papel (Camada 3) → RLS por tabela (Camada 2) → Triggers como fonte da verdade para transições de estado, privilégio e proteção de conta (Camada 1). Nenhuma variável de ambiente/segredo aparece no front — só `SUPA_URL` e a `publishable key` (seguros por design, protegidos pelo RLS).
 
 ---
 
-## 11. Automação de Alertas
+## 13. Automação de Alertas
 
 `pg_cron` roda `fn_gerar_notificacoes_operacionais()` diariamente às 10h UTC (07h BRT), gerando notificações in-app (e e-mail, para os tipos críticos) para: aferição vencendo em ≤7 dias, e ferramentas emprestadas há mais de 30 dias sem devolução.
 
 ---
 
-## 12. Deploy e Infraestrutura
+## 14. Deploy e Infraestrutura
 
 - Repositório: `github.com/brunnocstt/FerramentariaDeva`, branch `main`, sem build step.
 - Arquivo `CNAME` no repo aponta para `ferramentariadeva.albusdata.com.br`.
@@ -223,11 +274,11 @@ Mesma defesa em profundidade de 4 camadas do app de Gestão de Projetos: UX (Cam
 |---|---|
 | `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` | Injetadas automaticamente |
 | `APP_URL` | Configurada (`https://ferramentariadeva.albusdata.com.br`) |
-| `SMTP_USER` / `ICLOUD_APP_PASSWORD` / `FROM_EMAIL` | **Pendente** — ver seção 13 |
+| `SMTP_USER` / `ICLOUD_APP_PASSWORD` / `FROM_EMAIL` | **Pendente** — ver seção 15 |
 
 ---
 
-## 13. Pendências Manuais
+## 15. Pendências Manuais
 
 Ações fora do alcance do agente, que dependem do usuário:
 
@@ -239,4 +290,4 @@ Ações fora do alcance do agente, que dependem do usuário:
 
 ---
 
-*Documentação gerada em 07/08/2026. Para atualizar, edite este arquivo e faça `git push`.*
+*Documentação gerada em 07/08/2026, atualizada em 13/08/2026 (Rodada 2). Para atualizar, edite este arquivo e faça `git push`.*
