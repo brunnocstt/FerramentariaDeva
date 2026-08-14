@@ -168,6 +168,7 @@ const STATUS_FERRAMENTA_INFO={
   com_colaborador:{label:"Com Colaborador",color:"#1955FF",bg:"#EEF2FF"},
   em_afericao:{label:"Em Aferição",color:"#D97706",bg:"#FFFBEB"},
   em_conserto:{label:"Em Conserto",color:"#DB2777",bg:"#FDF2F8"},
+  em_transferencia:{label:"Em Transferência",color:"#7C3AED",bg:"#F5F3FF"},
   extraviada:{label:"Extraviada",color:"#B91C1C",bg:"#FEF2F2"},
   baixada:{label:"Baixada",color:"#6B7280",bg:"#F3F4F6"},
 };
@@ -175,7 +176,7 @@ const TIPO_MOV_LABEL={
   retirada:"Retirada",devolucao:"Devolução",envio_afericao:"Enviada p/ Aferição",
   retorno_afericao:"Retornou da Aferição",envio_conserto:"Enviada p/ Conserto",
   retorno_conserto:"Retornou do Conserto",extravio:"Extravio Reportado",
-  baixa:"Baixa",reativacao:"Reativação",
+  baixa:"Baixa",reativacao:"Reativação",transferencia:"Transferência entre Filiais",
 };
 const RESULTADO_ITEM_INFO={
   encontrada:{label:"Encontrada",color:"#059669",bg:"#ECFDF5"},
@@ -653,12 +654,10 @@ function Sidebar({currentUser,activeNav,setActiveNav,onLogout,onViewProfile,
   const isColaborador=ut==="colaborador";
 
   const nav=isColaborador?[
-    {id:"retiradas",label:"Retiradas",Icon:ScanLine},
-    {id:"ferramentas",label:"Ferramentas",Icon:Wrench},
+    {id:"ferramentas",label:"Estoque",Icon:Wrench},
   ]:[
     {id:"dashboard",label:"Dashboard",Icon:LayoutDashboard},
-    {id:"retiradas",label:"Retiradas",Icon:ScanLine},
-    {id:"ferramentas",label:"Ferramentas",Icon:Wrench},
+    {id:"ferramentas",label:"Estoque",Icon:Wrench},
     {id:"movimentacoes",label:"Movimentações",Icon:ArrowLeftRight},
     {id:"manutencoes",label:"Manutenções",Icon:PackageX},
     {id:"auditorias",label:"Auditorias",Icon:ClipboardList},
@@ -843,7 +842,7 @@ function DashboardView({profile,filiais}){
     async function load(){
       setLoading(true);
       let q=supabase.from("ferramentas_unidade").select("status,data_proxima_afericao,ativo");
-      if(profile.userType!=="admin_geral")q=q.eq("filial_id",profile.filialId);
+      if(profile.userType!=="admin_geral")q=q.in("filial_id",profile.filialIds);
       const{data,error}=await q;
       if(cancelled)return;
       if(!error&&data){
@@ -863,7 +862,7 @@ function DashboardView({profile,filiais}){
     }
     load();
     return()=>{cancelled=true;};
-  },[profile.filialId,profile.userType]);
+  },[profile.filialIds,profile.userType]);
 
   if(loading)return <div style={{padding:60,textAlign:"center"}}><Spinner size={22}/></div>;
   if(!stats)return null;
@@ -872,7 +871,8 @@ function DashboardView({profile,filiais}){
     <div className="fade" style={{padding:"28px 32px"}}>
       <h1 style={{fontSize:22,fontWeight:800,color:"#111827",margin:"0 0 4px"}}>Dashboard</h1>
       <p style={{fontSize:13,color:"#6B7280",margin:"0 0 24px"}}>
-        Visão geral {profile.userType==="admin_geral"?"de todas as filiais":`da filial ${profile.filialNome}`}.
+        Visão geral {profile.userType==="admin_geral"?"de todas as filiais":
+          profile.filiaisAcesso.length>1?`das filiais ${profile.filiaisAcesso.map(f=>f.nome).join(", ")}`:`da filial ${profile.filialNome}`}.
       </p>
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:14,marginBottom:14}}>
         <StatCard label="Total de Ferramentas" value={stats.total} Icon={Wrench} color={BLUE}/>
@@ -906,7 +906,8 @@ function ModalNovaFerramenta({onClose,onSaved,filiais,categorias,catalogos,profi
   const[novoTipoCategoriaId,setNovoTipoCategoriaId]=useState("");
   const[codigo,setCodigo]=useState(editandoUnidade?.codigo||"");
   const[quantidade,setQuantidade]=useState("");
-  const[filialId,setFilialId]=useState(editandoUnidade?.filial_id||(profile.userType==="admin_area"?profile.filialId:""));
+  const filiaisPermitidas=profile.userType==="admin_geral"?filiais:filiais.filter(f=>profile.filialIds.includes(f.id));
+  const[filialId,setFilialId]=useState(editandoUnidade?.filial_id||(filiaisPermitidas.length===1?filiaisPermitidas[0].id:""));
   const[dataProximaAfericao,setDataProximaAfericao]=useState(editandoUnidade?.data_proxima_afericao||"");
   const[observacoes,setObservacoes]=useState(editandoUnidade?.observacoes||"");
   const[loading,setLoading]=useState(false);
@@ -1017,9 +1018,9 @@ function ModalNovaFerramenta({onClose,onSaved,filiais,categorias,catalogos,profi
 
         <Field label="Filial" required>
           <select value={filialId} onChange={e=>setFilialId(e.target.value)} style={inputStyle}
-            disabled={!!editandoUnidade||profile.userType==="admin_area"}>
+            disabled={!!editandoUnidade||filiaisPermitidas.length===1}>
             <option value="">Selecione...</option>
-            {filiais.map(f=><option key={f.id} value={f.id}>{f.nome}</option>)}
+            {filiaisPermitidas.map(f=><option key={f.id} value={f.id}>{f.nome}</option>)}
           </select>
         </Field>
 
@@ -1130,6 +1131,7 @@ function FerramentaDetalheModal({ferramenta,onClose,onChanged,profile,filiais,ca
     disponivel:[
       {tipo:"retirada",label:"Registrar Retirada",Icon:PackagePlus},
       ...(requerAfericao?[{tipo:"envio_afericao",label:"Enviar p/ Aferição",Icon:Clock}]:[]),
+      ...(profile.filiaisAcesso.length>1?[{tipo:"transferencia",label:"Transferir para Outra Filial",Icon:ArrowLeftRight}]:[]),
       {tipo:"extravio",label:"Reportar Extravio",Icon:AlertTriangle,danger:true},
       ...(isAdmin?[{tipo:"baixa",label:"Dar Baixa",Icon:Ban,danger:true,adminOnly:true}]:[]),
     ],
@@ -1197,6 +1199,12 @@ function FerramentaDetalheModal({ferramenta,onClose,onChanged,profile,filiais,ca
           Esta ferramenta está em conserto. Registre o retorno na tela de <strong>Manutenções</strong>.
         </div>
       )}
+      {ferramenta.status==="em_transferencia"&&(
+        <div style={{marginBottom:20,padding:12,borderRadius:10,background:"#F5F3FF",border:"1px solid #DDD6FE",
+          fontSize:12.5,color:"#5B21B6"}}>
+          Esta ferramenta tem uma transferência de filial pendente de aprovação.
+        </div>
+      )}
 
       <div>
         <div style={{fontSize:11,fontWeight:700,color:"#9CA3AF",textTransform:"uppercase",marginBottom:8,letterSpacing:".4px"}}>Histórico</div>
@@ -1222,12 +1230,60 @@ function FerramentaDetalheModal({ferramenta,onClose,onChanged,profile,filiais,ca
         )}
       </div>
 
-      {acao&&<ModalAcao ferramenta={ferramenta} tipo={acao} pessoasFilial={pessoasFilial}
+      {acao&&acao!=="transferencia"&&<ModalAcao ferramenta={ferramenta} tipo={acao} pessoasFilial={pessoasFilial}
         onClose={()=>setAcao(null)}
         onDone={()=>{setAcao(null);loadHist();onChanged();}}/>}
+      {acao==="transferencia"&&<ModalTransferencia ferramenta={ferramenta} filiais={filiais} profile={profile}
+        onClose={()=>setAcao(null)}
+        onDone={()=>{setAcao(null);onChanged();}}/>}
       {editando&&<ModalNovaFerramenta editandoUnidade={ferramenta} filiais={filiais} categorias={categorias} catalogos={catalogos} profile={profile}
         onClose={()=>setEditando(false)}
         onSaved={()=>{setEditando(false);onChanged();}}/>}
+    </Modal>
+  );
+}
+
+function ModalTransferencia({ferramenta,filiais,profile,onClose,onDone}){
+  const opcoesDestino=filiais.filter(f=>profile.filialIds.includes(f.id)&&f.id!==ferramenta.filial_id);
+  const[filialDestinoId,setFilialDestinoId]=useState(opcoesDestino.length===1?opcoesDestino[0].id:"");
+  const[motivo,setMotivo]=useState("");
+  const[loading,setLoading]=useState(false);
+  const[error,setError]=useState("");
+
+  async function confirmar(){
+    if(!filialDestinoId){setError("Selecione a filial de destino.");return;}
+    setLoading(true);setError("");
+    const{error:err}=await supabase.from("transferencias_ferramenta").insert({
+      ferramenta_id:ferramenta.id,filial_destino_id:filialDestinoId,motivo:motivo.trim()||null,
+    });
+    setLoading(false);
+    if(err){setError(err.message||"Não foi possível solicitar a transferência.");return;}
+    onDone();
+  }
+
+  return(
+    <Modal title="Transferir para Outra Filial" onClose={onClose}
+      footer={<><BtnSecondary onClick={onClose}>Cancelar</BtnSecondary>
+        <BtnPrimary onClick={confirmar} loading={loading}>Solicitar Transferência</BtnPrimary></>}>
+      <ErrorBox>{error}</ErrorBox>
+      <div style={{marginBottom:16,padding:12,borderRadius:10,background:"#F9FAFB",border:"1px solid #F1F5F9"}}>
+        <div style={{fontSize:11,color:"#9CA3AF",fontWeight:700,textTransform:"uppercase",marginBottom:2}}>{ferramenta.codigo}</div>
+        <div style={{fontSize:14,fontWeight:700,color:"#111827"}}>{ferramenta.catalogo?.nome}</div>
+      </div>
+      <div style={{display:"flex",flexDirection:"column",gap:14}}>
+        <Field label="Filial de destino" required>
+          <select value={filialDestinoId} onChange={e=>setFilialDestinoId(e.target.value)} style={inputStyle}>
+            <option value="">Selecione...</option>
+            {opcoesDestino.map(f=><option key={f.id} value={f.id}>{f.nome}</option>)}
+          </select>
+        </Field>
+        <Field label="Motivo (opcional)">
+          <textarea value={motivo} onChange={e=>setMotivo(e.target.value)} style={{...inputStyle,minHeight:70,resize:"vertical"}}/>
+        </Field>
+        <p style={{fontSize:11.5,color:"#9CA3AF",margin:0}}>
+          A transferência fica pendente até um gestor da filial de destino aprovar. A ferramenta fica bloqueada (indisponível para retirada) enquanto isso.
+        </p>
+      </div>
     </Modal>
   );
 }
@@ -1337,6 +1393,79 @@ function ModalEstoqueDetalhe({estoque,onClose,onChanged,profile,filiais}){
   );
 }
 
+function TransferenciasPendentesPanel({profile,onChanged}){
+  const[lista,setLista]=useState([]);
+  const[loading,setLoading]=useState(true);
+  const[processando,setProcessando]=useState(null);
+  const[error,setError]=useState("");
+
+  async function load(){
+    setLoading(true);
+    const{data}=await supabase.from("transferencias_ferramenta")
+      .select("*, ferramenta:ferramenta_id(codigo,catalogo:catalogo_id(nome)), origem:filial_origem_id(nome), destino:filial_destino_id(nome), solicitante:solicitante_id(name)")
+      .eq("status","pendente").order("created_at",{ascending:false});
+    setLista(data||[]);
+    setLoading(false);
+  }
+  useEffect(()=>{load();},[]);
+
+  useEffect(()=>{
+    const ch=supabase.channel("transferencias-rt")
+      .on("postgres_changes",{event:"*",schema:"public",table:"transferencias_ferramenta"},()=>load())
+      .subscribe();
+    return()=>supabase.removeChannel(ch);
+  },[]);
+
+  async function decidir(t,status){
+    setProcessando(t.id);setError("");
+    const{error:err}=await supabase.from("transferencias_ferramenta").update({status}).eq("id",t.id);
+    setProcessando(null);
+    if(err){setError(err.message||"Não foi possível registrar a decisão.");return;}
+    load();
+    onChanged?.();
+  }
+
+  if(!loading&&lista.length===0)return null;
+
+  return(
+    <div style={{marginBottom:18,background:"#fff",border:"1px solid #F1F5F9",borderRadius:14,padding:"16px 18px"}}>
+      <div style={{fontSize:13,fontWeight:800,color:"#111827",marginBottom:10,display:"flex",alignItems:"center",gap:7}}>
+        <ArrowLeftRight size={15} color={BLUE}/>Transferências Pendentes{lista.length>0?` (${lista.length})`:""}
+      </div>
+      <ErrorBox>{error}</ErrorBox>
+      {loading?<div style={{padding:16,textAlign:"center"}}><Spinner size={16}/></div>:(
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>
+          {lista.map(t=>{
+            const podeDecidir=profile.userType==="admin_geral"||(profile.userType==="admin_area"&&profile.filialId===t.filial_destino_id);
+            const podeCancelar=!podeDecidir&&t.solicitante_id===profile.id;
+            return(
+              <div key={t.id} style={{padding:"10px 14px",background:"#FAFAFA",border:"1px solid #F1F5F9",borderRadius:10,
+                display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
+                <div>
+                  <div style={{fontSize:13,fontWeight:700,color:"#111827"}}>
+                    {t.ferramenta?.codigo} — {t.ferramenta?.catalogo?.nome}
+                  </div>
+                  <div style={{fontSize:11.5,color:"#6B7280"}}>
+                    {t.origem?.nome} → {t.destino?.nome} · solicitado por {t.solicitante?.name} em {fmtDateTime(t.created_at)}
+                  </div>
+                  {t.motivo&&<div style={{fontSize:12,color:"#374151",marginTop:2}}>{t.motivo}</div>}
+                </div>
+                <div style={{display:"flex",gap:6}}>
+                  {podeDecidir&&<>
+                    <BtnPrimary onClick={()=>decidir(t,"aprovada")} loading={processando===t.id}>Aprovar</BtnPrimary>
+                    <BtnSecondary onClick={()=>decidir(t,"rejeitada")} disabled={processando===t.id}>Rejeitar</BtnSecondary>
+                  </>}
+                  {podeCancelar&&<BtnSecondary onClick={()=>decidir(t,"cancelada")} disabled={processando===t.id}>Cancelar</BtnSecondary>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCatalogos}){
   const isMobile=useIsMobile();
   const[unidades,setUnidades]=useState([]);
@@ -1344,19 +1473,21 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
   const[loading,setLoading]=useState(true);
   const[busca,setBusca]=useState("");
   const[filtroStatus,setFiltroStatus]=useState("");
-  const[filtroFilial,setFiltroFilial]=useState(profile.userType==="admin_geral"?"":profile.filialId);
+  const[filtroFilial,setFiltroFilial]=useState("");
   const[filtroCategoria,setFiltroCategoria]=useState("");
   const[selecionada,setSelecionada]=useState(null);
   const[estoqueSelecionado,setEstoqueSelecionado]=useState(null);
   const[novaAberta,setNovaAberta]=useState(false);
+  const[retiradaAberta,setRetiradaAberta]=useState(false);
+  const[devolucaoAberta,setDevolucaoAberta]=useState(false);
   const isAdmin=profile.userType==="admin_geral"||profile.userType==="admin_area";
 
   async function load(){
     setLoading(true);
     let qU=supabase.from("ferramentas_unidade").select("*, colaborador_atual:colaborador_atual_id(name), catalogo:catalogo_id(nome,categoria_id)").order("codigo");
     let qE=supabase.from("estoque_pool").select("*, catalogo:catalogo_id(nome,categoria_id)");
-    if(profile.userType!=="admin_geral"){qU=qU.eq("filial_id",profile.filialId);qE=qE.eq("filial_id",profile.filialId);}
-    else if(filtroFilial){qU=qU.eq("filial_id",filtroFilial);qE=qE.eq("filial_id",filtroFilial);}
+    if(filtroFilial){qU=qU.eq("filial_id",filtroFilial);qE=qE.eq("filial_id",filtroFilial);}
+    else if(profile.userType!=="admin_geral"){qU=qU.in("filial_id",profile.filialIds);qE=qE.in("filial_id",profile.filialIds);}
     if(filtroStatus)qU=qU.eq("status",filtroStatus);
     if(filtroCategoria){
       const idsCat=catalogos.filter(c=>c.categoria_id===filtroCategoria).map(c=>c.id);
@@ -1372,7 +1503,7 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
     setEstoques((dE||[]).map(e=>({...e,quantidade_emprestada:empMap[e.id]||0,quantidade_disponivel:e.quantidade_total-(empMap[e.id]||0)})));
     setLoading(false);
   }
-  useEffect(()=>{load();},[filtroStatus,filtroFilial,filtroCategoria,profile.filialId]);
+  useEffect(()=>{load();},[filtroStatus,filtroFilial,filtroCategoria,profile.filialIds]);
 
   const unidadesFiltradas=useMemo(()=>{
     const t=busca.trim().toLowerCase();
@@ -1397,11 +1528,17 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
     <div className="fade" style={{padding:isMobile?"20px 16px":"28px 32px"}}>
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:20,flexWrap:"wrap",gap:12}}>
         <div>
-          <h1 style={{fontSize:22,fontWeight:800,color:"#111827",margin:"0 0 4px"}}>Ferramentas</h1>
+          <h1 style={{fontSize:22,fontWeight:800,color:"#111827",margin:"0 0 4px"}}>Estoque</h1>
           <p style={{fontSize:13,color:"#6B7280",margin:0}}>{totalItens} item(ns)</p>
         </div>
-        {isAdmin&&<BtnPrimary onClick={()=>setNovaAberta(true)}><Plus size={15}/>Nova Ferramenta</BtnPrimary>}
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          <BtnSecondary onClick={()=>setDevolucaoAberta(true)}><ScanLine size={15}/>Devolver Ferramenta</BtnSecondary>
+          <BtnPrimary onClick={()=>setRetiradaAberta(true)}><ScanLine size={15}/>Nova Retirada</BtnPrimary>
+          {isAdmin&&<BtnPrimary onClick={()=>setNovaAberta(true)}><Plus size={15}/>Nova Ferramenta</BtnPrimary>}
+        </div>
       </div>
+
+      {profile.userType!=="colaborador"&&<TransferenciasPendentesPanel profile={profile} onChanged={load}/>}
 
       <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:18}}>
         <div style={{position:"relative",flex:"1 1 220px"}}>
@@ -1413,10 +1550,10 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
           <option value="">Todos os status</option>
           {Object.entries(STATUS_FERRAMENTA_INFO).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
         </select>
-        {profile.userType==="admin_geral"&&(
+        {(profile.userType==="admin_geral"||profile.filiaisAcesso.length>1)&&(
           <select value={filtroFilial} onChange={e=>setFiltroFilial(e.target.value)} style={{...inputStyle,width:"auto"}}>
             <option value="">Todas as filiais</option>
-            {filiais.map(f=><option key={f.id} value={f.id}>{f.nome}</option>)}
+            {(profile.userType==="admin_geral"?filiais:profile.filiaisAcesso).map(f=><option key={f.id} value={f.id}>{f.nome}</option>)}
           </select>
         )}
         <select value={filtroCategoria} onChange={e=>setFiltroCategoria(e.target.value)} style={{...inputStyle,width:"auto"}}>
@@ -1513,6 +1650,10 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
         onChanged={()=>{load();setEstoqueSelecionado(null);}}/>}
       {novaAberta&&<ModalNovaFerramenta filiais={filiais} categorias={categorias} catalogos={catalogos} profile={profile}
         onClose={()=>setNovaAberta(false)} onSaved={()=>{setNovaAberta(false);reloadCatalogos&&reloadCatalogos();load();}}/>}
+      {retiradaAberta&&<ModalNovaRetirada filiais={filiais}
+        onClose={()=>setRetiradaAberta(false)} onFeito={load}/>}
+      {devolucaoAberta&&<ModalDevolucao filiais={filiais}
+        onClose={()=>setDevolucaoAberta(false)} onFeito={load}/>}
     </div>
   );
 }
@@ -1520,7 +1661,80 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
 /* ══════════════════════════════════════════════════════════════
    RETIRADAS — fluxo do ferramenteiro (leitor de crachá → matrícula)
    ══════════════════════════════════════════════════════════════ */
-function RetiradaColaborador({colaborador,onVoltar}){
+// Lê o código de barras do crachá (filial+matrícula juntos, ex.:
+// 055003000830 → filial 55003 + matrícula 830) ou aceita digitação
+// manual curta (só a matrícula, escopada pelo RLS à filial de quem
+// está operando a tela).
+async function buscarColaboradorPorCracha(bruto,filiais){
+  const digitos=bruto.replace(/\D/g,"");
+  let query=supabase.from("profiles").select("id,name,filial_id,matricula").eq("is_active",true);
+  if(digitos.length>=8){
+    const meio=Math.floor(digitos.length/2);
+    const filialCodigo=String(parseInt(digitos.slice(0,meio),10));
+    const matriculaLida=String(parseInt(digitos.slice(meio),10));
+    const filial=(filiais||[]).find(f=>f.codigo_barras&&String(parseInt(f.codigo_barras,10))===filialCodigo);
+    if(!filial)return{error:"Filial não reconhecida nesse código de barras. Verifique o cadastro em Configurações → Filiais."};
+    query=query.eq("filial_id",filial.id).eq("matricula",matriculaLida);
+  }else{
+    query=query.eq("matricula",digitos||bruto);
+  }
+  const{data,error}=await query.maybeSingle();
+  if(error||!data)return{error:"Matrícula não encontrada ou colaborador inativo."};
+  return{colaborador:data};
+}
+
+function CampoBuscaCracha({filiais,onEncontrado}){
+  const[matricula,setMatricula]=useState("");
+  const[buscando,setBuscando]=useState(false);
+  const[erro,setErro]=useState("");
+  const ref=useRef(null);
+  useEffect(()=>{ref.current?.focus();},[]);
+
+  async function buscar(e){
+    e.preventDefault();
+    if(!matricula.trim())return;
+    setBuscando(true);setErro("");
+    const res=await buscarColaboradorPorCracha(matricula.trim(),filiais);
+    setBuscando(false);
+    if(res.error){setErro(res.error);return;}
+    onEncontrado(res.colaborador);
+  }
+
+  return(
+    <form onSubmit={buscar} style={{display:"flex",flexDirection:"column",gap:16}}>
+      <ErrorBox>{erro}</ErrorBox>
+      <Field label="Matrícula do colaborador" hint="Passe o crachá no leitor (ele digita e envia sozinho) ou digite e aperte Enter.">
+        <input ref={ref} value={matricula} onChange={e=>setMatricula(e.target.value)} autoFocus
+          style={{...inputStyle,fontSize:24,padding:"18px 14px",textAlign:"center",letterSpacing:"3px"}} placeholder="0-550XX-00-XXXX"/>
+      </Field>
+      <BtnPrimary type="submit" loading={buscando}><ScanLine size={16}/>Buscar</BtnPrimary>
+    </form>
+  );
+}
+
+function ModalNovaRetirada({filiais,onClose,onFeito}){
+  const[colaborador,setColaborador]=useState(null);
+  return(
+    <Modal title="Nova Retirada" onClose={onClose}>
+      {!colaborador
+        ?<CampoBuscaCracha filiais={filiais} onEncontrado={setColaborador}/>
+        :<RetiradaColaborador colaborador={colaborador} onVoltar={()=>setColaborador(null)} onFeito={onFeito}/>}
+    </Modal>
+  );
+}
+
+function ModalDevolucao({filiais,onClose,onFeito}){
+  const[colaborador,setColaborador]=useState(null);
+  return(
+    <Modal title="Devolver Ferramenta" onClose={onClose}>
+      {!colaborador
+        ?<CampoBuscaCracha filiais={filiais} onEncontrado={setColaborador}/>
+        :<DevolucaoColaborador colaborador={colaborador} onVoltar={()=>setColaborador(null)} onFeito={onFeito}/>}
+    </Modal>
+  );
+}
+
+function RetiradaColaborador({colaborador,onVoltar,onFeito}){
   const[busca,setBusca]=useState("");
   const[unidades,setUnidades]=useState([]);
   const[estoques,setEstoques]=useState([]);
@@ -1552,6 +1766,7 @@ function RetiradaColaborador({colaborador,onVoltar}){
     if(err){setError(err.message||"Não foi possível registrar.");return;}
     setFeitos(prev=>[...prev,`${u.codigo} — ${u.catalogo?.nome}`]);
     load();
+    onFeito?.();
   }
   async function retirarPool(e){
     const qtd=parseInt(qtdPool[e.id]||1,10);
@@ -1563,6 +1778,7 @@ function RetiradaColaborador({colaborador,onVoltar}){
     setFeitos(prev=>[...prev,`${qtd}x ${e.catalogo?.nome}`]);
     setQtdPool(prev=>({...prev,[e.id]:1}));
     load();
+    onFeito?.();
   }
 
   const t=busca.trim().toLowerCase();
@@ -1621,11 +1837,12 @@ function RetiradaColaborador({colaborador,onVoltar}){
   );
 }
 
-function DevolucaoColaborador({colaborador,onVoltar}){
+function DevolucaoColaborador({colaborador,onVoltar,onFeito}){
   const[unidades,setUnidades]=useState([]);
   const[emprestimos,setEmprestimos]=useState([]);
   const[loading,setLoading]=useState(true);
-  const[processando,setProcessando]=useState(null);
+  const[selecionados,setSelecionados]=useState(()=>new Set());
+  const[salvando,setSalvando]=useState(false);
   const[error,setError]=useState("");
   const[feitos,setFeitos]=useState([]);
 
@@ -1639,25 +1856,38 @@ function DevolucaoColaborador({colaborador,onVoltar}){
     ]);
     setUnidades(dU||[]);
     setEmprestimos(dE||[]);
+    setSelecionados(new Set());
     setLoading(false);
   }
   useEffect(()=>{load();},[colaborador.id]);
 
-  async function devolverUnidade(u){
-    setProcessando(u.id);setError("");
-    const{error:err}=await supabase.from("movimentacoes").insert({ferramenta_id:u.id,tipo:"devolucao"});
-    setProcessando(null);
-    if(err){setError(err.message||"Não foi possível registrar.");return;}
-    setFeitos(prev=>[...prev,`${u.codigo} — ${u.catalogo?.nome}`]);
-    load();
+  function toggle(key){
+    setSelecionados(prev=>{
+      const next=new Set(prev);
+      if(next.has(key))next.delete(key);else next.add(key);
+      return next;
+    });
   }
-  async function devolverEmprestimo(e){
-    setProcessando(e.id);setError("");
-    const{error:err}=await supabase.from("emprestimos").update({data_devolucao:new Date().toISOString()}).eq("id",e.id);
-    setProcessando(null);
-    if(err){setError(err.message||"Não foi possível registrar.");return;}
-    setFeitos(prev=>[...prev,`${e.quantidade}x ${e.estoque?.catalogo?.nome}`]);
+
+  async function confirmarDevolucao(){
+    setSalvando(true);setError("");
+    const novosFeitos=[];
+    for(const u of unidades){
+      if(!selecionados.has("u-"+u.id))continue;
+      const{error:err}=await supabase.from("movimentacoes").insert({ferramenta_id:u.id,tipo:"devolucao"});
+      if(err){setError(`Não foi possível devolver ${u.codigo}: ${err.message||""}`);setSalvando(false);load();onFeito?.();return;}
+      novosFeitos.push(`${u.codigo} — ${u.catalogo?.nome}`);
+    }
+    for(const e of emprestimos){
+      if(!selecionados.has("e-"+e.id))continue;
+      const{error:err}=await supabase.from("emprestimos").update({data_devolucao:new Date().toISOString()}).eq("id",e.id);
+      if(err){setError(`Não foi possível devolver ${e.estoque?.catalogo?.nome}: ${err.message||""}`);setSalvando(false);load();onFeito?.();return;}
+      novosFeitos.push(`${e.quantidade}x ${e.estoque?.catalogo?.nome}`);
+    }
+    setFeitos(prev=>[...prev,...novosFeitos]);
+    setSalvando(false);
     load();
+    onFeito?.();
   }
 
   const nada=unidades.length===0&&emprestimos.length===0;
@@ -1681,114 +1911,48 @@ function DevolucaoColaborador({colaborador,onVoltar}){
       )}
       {loading?<div style={{padding:40,textAlign:"center"}}><Spinner size={20}/></div>:
       nada?<EmptyState icon={PackageCheck} title="Nada emprestado com esse colaborador no momento"/>:(
+        <>
+        <p style={{fontSize:12,color:"#9CA3AF",margin:"0 0 10px"}}>Marque uma ou mais ferramentas e confirme a devolução.</p>
         <div style={{display:"flex",flexDirection:"column",gap:8}}>
-          {unidades.map(u=>(
-            <div key={u.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",
-              background:"#fff",border:"1px solid #F1F5F9",borderRadius:10,flexWrap:"wrap",gap:8}}>
-              <div>
-                <span style={{fontSize:11,color:"#9CA3AF",fontWeight:700}}>{u.codigo}</span>{" "}
-                <span style={{fontSize:13.5,fontWeight:700,color:"#111827"}}>{u.catalogo?.nome}</span>
-                <div style={{fontSize:11,color:"#9CA3AF"}}>Desde {fmtDateTime(u.data_retirada_atual)}</div>
-              </div>
-              <BtnPrimary onClick={()=>devolverUnidade(u)} loading={processando===u.id}>Devolver</BtnPrimary>
-            </div>
-          ))}
-          {emprestimos.map(e=>(
-            <div key={e.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",
-              background:"#fff",border:"1px solid #F1F5F9",borderRadius:10,flexWrap:"wrap",gap:8}}>
-              <div>
-                <span style={{fontSize:13.5,fontWeight:700,color:"#111827"}}>{e.quantidade}x {e.estoque?.catalogo?.nome}</span>
-                <div style={{fontSize:11,color:"#9CA3AF"}}>Desde {fmtDateTime(e.data_retirada)}</div>
-              </div>
-              <BtnPrimary onClick={()=>devolverEmprestimo(e)} loading={processando===e.id}>Devolver</BtnPrimary>
-            </div>
-          ))}
+          {unidades.map(u=>{
+            const key="u-"+u.id, checked=selecionados.has(key);
+            return(
+              <label key={key} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",cursor:"pointer",
+                background:checked?"#EEF2FF":"#fff",border:`1.5px solid ${checked?BLUE:"#F1F5F9"}`,borderRadius:10}}>
+                <input type="checkbox" checked={checked} onChange={()=>toggle(key)} style={{width:16,height:16,flexShrink:0}}/>
+                <div style={{flex:1,minWidth:0}}>
+                  <span style={{fontSize:11,color:"#9CA3AF",fontWeight:700}}>{u.codigo}</span>{" "}
+                  <span style={{fontSize:13.5,fontWeight:700,color:"#111827"}}>{u.catalogo?.nome}</span>
+                  <div style={{fontSize:11,color:"#9CA3AF"}}>Desde {fmtDateTime(u.data_retirada_atual)}</div>
+                </div>
+              </label>
+            );
+          })}
+          {emprestimos.map(e=>{
+            const key="e-"+e.id, checked=selecionados.has(key);
+            return(
+              <label key={key} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",cursor:"pointer",
+                background:checked?"#EEF2FF":"#fff",border:`1.5px solid ${checked?BLUE:"#F1F5F9"}`,borderRadius:10}}>
+                <input type="checkbox" checked={checked} onChange={()=>toggle(key)} style={{width:16,height:16,flexShrink:0}}/>
+                <div style={{flex:1,minWidth:0}}>
+                  <span style={{fontSize:13.5,fontWeight:700,color:"#111827"}}>{e.quantidade}x {e.estoque?.catalogo?.nome}</span>
+                  <div style={{fontSize:11,color:"#9CA3AF"}}>Desde {fmtDateTime(e.data_retirada)}</div>
+                </div>
+              </label>
+            );
+          })}
         </div>
+        <div style={{marginTop:16}}>
+          <BtnPrimary onClick={confirmarDevolucao} loading={salvando} disabled={selecionados.size===0}>
+            Confirmar Devolução{selecionados.size>0?` (${selecionados.size})`:""}
+          </BtnPrimary>
+        </div>
+        </>
       )}
     </div>
   );
 }
 
-function RetiradasView({filiais}){
-  const isMobile=useIsMobile();
-  const[modo,setModo]=useState("retirar");
-  const[matricula,setMatricula]=useState("");
-  const[colaborador,setColaborador]=useState(null);
-  const[buscando,setBuscando]=useState(false);
-  const[erro,setErro]=useState("");
-  const matriculaRef=useRef(null);
-
-  useEffect(()=>{ if(!colaborador)matriculaRef.current?.focus(); },[colaborador,modo]);
-
-  async function buscar(e){
-    e.preventDefault();
-    const bruto=matricula.trim();
-    if(!bruto)return;
-    setBuscando(true);setErro("");
-
-    // O leitor de código de barras lê o crachá inteiro (filial + matrícula
-    // no mesmo código, ex.: 055003000830 → filial 55003 + matrícula 830).
-    // Dividimos o código lido ao meio e convertemos cada metade pra número
-    // (isso descarta os zeros à esquerda de ambos os lados sozinho).
-    // Se não parecer um código completo (digitação manual só da matrícula,
-    // ex.: "830"), busca só por matrícula — o RLS já restringe à própria
-    // filial de quem está operando a tela.
-    const digitos=bruto.replace(/\D/g,"");
-    let query=supabase.from("profiles").select("id,name,filial_id,matricula").eq("is_active",true);
-    if(digitos.length>=8){
-      const meio=Math.floor(digitos.length/2);
-      const filialCodigo=String(parseInt(digitos.slice(0,meio),10));
-      const matriculaLida=String(parseInt(digitos.slice(meio),10));
-      const filial=(filiais||[]).find(f=>f.codigo_barras&&String(parseInt(f.codigo_barras,10))===filialCodigo);
-      if(!filial){setBuscando(false);setErro("Filial não reconhecida nesse código de barras. Verifique o cadastro em Configurações → Filiais.");return;}
-      query=query.eq("filial_id",filial.id).eq("matricula",matriculaLida);
-    }else{
-      query=query.eq("matricula",digitos||bruto);
-    }
-    const{data,error}=await query.maybeSingle();
-    setBuscando(false);
-    if(error||!data){setErro("Matrícula não encontrada ou colaborador inativo.");return;}
-    setColaborador(data);
-  }
-  function limpar(){
-    setColaborador(null);setMatricula("");setErro("");
-  }
-
-  return(
-    <div className="fade" style={{padding:isMobile?"20px 16px":"28px 32px"}}>
-      <h1 style={{fontSize:22,fontWeight:800,color:"#111827",margin:"0 0 4px"}}>Retiradas</h1>
-      <p style={{fontSize:13,color:"#6B7280",margin:"0 0 20px"}}>Leia o crachá do colaborador ou digite a matrícula.</p>
-
-      <div style={{display:"flex",gap:8,marginBottom:20}}>
-        <button onClick={()=>{setModo("retirar");limpar();}} style={{padding:"8px 16px",borderRadius:9,border:"none",
-          background:modo==="retirar"?BLUE:"#F3F4F6",color:modo==="retirar"?"#fff":"#374151",fontWeight:700,fontSize:13,cursor:"pointer"}}>
-          Retirar Ferramenta
-        </button>
-        <button onClick={()=>{setModo("devolver");limpar();}} style={{padding:"8px 16px",borderRadius:9,border:"none",
-          background:modo==="devolver"?BLUE:"#F3F4F6",color:modo==="devolver"?"#fff":"#374151",fontWeight:700,fontSize:13,cursor:"pointer"}}>
-          Devolver Ferramenta
-        </button>
-      </div>
-
-      {!colaborador?(
-        <div style={{maxWidth:480,margin:"40px auto 0"}}>
-          <form onSubmit={buscar} style={{display:"flex",flexDirection:"column",gap:16}}>
-            <ErrorBox>{erro}</ErrorBox>
-            <Field label="Matrícula do colaborador" hint="Passe o crachá no leitor (ele digita e envia sozinho) ou digite e aperte Enter.">
-              <input ref={matriculaRef} value={matricula} onChange={e=>setMatricula(e.target.value)} autoFocus
-                style={{...inputStyle,fontSize:28,padding:"22px 16px",textAlign:"center",letterSpacing:"3px"}} placeholder="0-550XX-00-XXXX"/>
-            </Field>
-            <BtnPrimary type="submit" loading={buscando}><ScanLine size={16}/>Buscar</BtnPrimary>
-          </form>
-        </div>
-      ):(
-        modo==="retirar"
-          ?<RetiradaColaborador colaborador={colaborador} onVoltar={limpar}/>
-          :<DevolucaoColaborador colaborador={colaborador} onVoltar={limpar}/>
-      )}
-    </div>
-  );
-}
 
 /* ══════════════════════════════════════════════════════════════
    MOVIMENTAÇÕES
@@ -1802,22 +1966,22 @@ function MovimentacoesView({profile,filiais}){
   async function load(){
     setLoading(true);
     let q=supabase.from("movimentacoes")
-      .select("*, ferramenta:ferramenta_id(codigo,nome,filial_id), registrado_por_profile:registrado_por(name), pessoa_responsavel:pessoa_responsavel_id(name)")
+      .select("*, ferramenta:ferramenta_id(codigo,filial_id,catalogo:catalogo_id(nome)), registrado_por_profile:registrado_por(name), pessoa_responsavel:pessoa_responsavel_id(name)")
       .order("data",{ascending:false}).limit(200);
     if(filtroTipo)q=q.eq("tipo",filtroTipo);
     const{data,error}=await q;
     if(!error){
-      const filtradas=profile.userType==="admin_geral"?data:(data||[]).filter(m=>m.ferramenta?.filial_id===profile.filialId);
+      const filtradas=profile.userType==="admin_geral"?data:(data||[]).filter(m=>profile.filialIds.includes(m.ferramenta?.filial_id));
       setLista(filtradas||[]);
     }
     setLoading(false);
   }
-  useEffect(()=>{load();},[filtroTipo,profile.filialId]);
+  useEffect(()=>{load();},[filtroTipo,profile.filialIds]);
 
   function exportar(){
     const rows=lista.map(m=>({
       Data:fmtDateTime(m.data),Tipo:TIPO_MOV_LABEL[m.tipo]||m.tipo,
-      Ferramenta:`${m.ferramenta?.codigo||""} - ${m.ferramenta?.nome||""}`,
+      Ferramenta:`${m.ferramenta?.codigo||""} - ${m.ferramenta?.catalogo?.nome||""}`,
       "Responsável":m.pessoa_responsavel?.name||"",
       "Registrado por":m.registrado_por_profile?.name||"",
       Observação:m.observacao||"",
@@ -1850,7 +2014,7 @@ function MovimentacoesView({profile,filiais}){
               <div style={{minWidth:0,flex:1}}>
                 <div style={{display:"flex",flexWrap:"wrap",gap:8,alignItems:"center"}}>
                   <span style={{fontSize:13,fontWeight:700,color:"#111827"}}>{TIPO_MOV_LABEL[m.tipo]||m.tipo}</span>
-                  <span style={{fontSize:12,color:"#6B7280"}}>{m.ferramenta?.codigo} — {m.ferramenta?.nome}</span>
+                  <span style={{fontSize:12,color:"#6B7280"}}>{m.ferramenta?.codigo} — {m.ferramenta?.catalogo?.nome}</span>
                 </div>
                 <div style={{fontSize:11.5,color:"#9CA3AF",marginTop:2}}>
                   {fmtDateTime(m.data)} · por {m.registrado_por_profile?.name||"—"}
@@ -1972,16 +2136,16 @@ function ManutencoesView({profile}){
     setLoading(true);
     let q=supabase.from("manutencoes").select("*, ferramenta:ferramenta_id(codigo,filial_id,catalogo:catalogo_id(nome))").order("data_envio",{ascending:false});
     const{data,error}=await q;
-    const filtradas=profile.userType==="admin_geral"?data:(data||[]).filter(m=>m.ferramenta?.filial_id===profile.filialId);
+    const filtradas=profile.userType==="admin_geral"?data:(data||[]).filter(m=>profile.filialIds.includes(m.ferramenta?.filial_id));
     if(!error)setLista(filtradas||[]);
 
     let q2=supabase.from("ferramentas_unidade").select("id,codigo,catalogo:catalogo_id(nome)").eq("status","disponivel");
-    if(profile.userType!=="admin_geral")q2=q2.eq("filial_id",profile.filialId);
+    if(profile.userType!=="admin_geral")q2=q2.in("filial_id",profile.filialIds);
     const{data:d2}=await q2;
     setDisponiveis(d2||[]);
     setLoading(false);
   }
-  useEffect(()=>{load();},[profile.filialId]);
+  useEffect(()=>{load();},[profile.filialIds]);
 
   return(
     <div className="fade" style={{padding:isMobile?"20px 16px":"28px 32px"}}>
@@ -2032,7 +2196,8 @@ function ManutencoesView({profile}){
    ══════════════════════════════════════════════════════════════ */
 function ModalNovaAuditoria({onClose,onSaved,filiais,profile}){
   const[titulo,setTitulo]=useState("");
-  const[filialId,setFilialId]=useState(profile.userType==="admin_area"?profile.filialId:"");
+  const filiaisPermitidas=profile.userType==="admin_geral"?filiais:filiais.filter(f=>profile.filialIds.includes(f.id));
+  const[filialId,setFilialId]=useState(filiaisPermitidas.length===1?filiaisPermitidas[0].id:"");
   const[loading,setLoading]=useState(false);
   const[error,setError]=useState("");
 
@@ -2057,9 +2222,9 @@ function ModalNovaAuditoria({onClose,onSaved,filiais,profile}){
           <input value={titulo} onChange={e=>setTitulo(e.target.value)} style={inputStyle} placeholder="Ex.: Auditoria de Ferramentaria — Julho/2026"/>
         </Field>
         <Field label="Filial" required>
-          <select value={filialId} onChange={e=>setFilialId(e.target.value)} style={inputStyle} disabled={profile.userType==="admin_area"}>
+          <select value={filialId} onChange={e=>setFilialId(e.target.value)} style={inputStyle} disabled={filiaisPermitidas.length===1}>
             <option value="">Selecione...</option>
-            {filiais.map(f=><option key={f.id} value={f.id}>{f.nome}</option>)}
+            {filiaisPermitidas.map(f=><option key={f.id} value={f.id}>{f.nome}</option>)}
           </select>
         </Field>
       </div>
@@ -2176,12 +2341,12 @@ function AuditoriasView({profile,filiais}){
   async function load(){
     setLoading(true);
     let q=supabase.from("auditorias_ferramentaria").select("*, filial:filial_id(nome)").order("created_at",{ascending:false});
-    if(profile.userType!=="admin_geral")q=q.eq("filial_id",profile.filialId);
+    if(profile.userType!=="admin_geral")q=q.in("filial_id",profile.filialIds);
     const{data,error}=await q;
     if(!error)setLista(data||[]);
     setLoading(false);
   }
-  useEffect(()=>{load();},[profile.filialId]);
+  useEffect(()=>{load();},[profile.filialIds]);
 
   if(ativa)return <AuditoriaExecucaoView auditoria={ativa} onBack={()=>setAtiva(null)} onChanged={load}/>;
 
@@ -2251,9 +2416,35 @@ function ModalUsuario({onClose,onSaved,filiais,profile,editando}){
   const[matricula,setMatricula]=useState(editando?.matricula||"");
   const[userType,setUserType]=useState(editando?.user_type||"colaborador");
   const[filialId,setFilialId]=useState(editando?.filial_id||(profile.userType==="admin_area"?profile.filialId:""));
+  const[filiaisExtras,setFiliaisExtras]=useState(()=>new Set());
   const[loading,setLoading]=useState(false);
   const[error,setError]=useState("");
   const[resultado,setResultado]=useState(null);
+  const podeConcederAcesso=profile.userType==="admin_geral";
+
+  useEffect(()=>{
+    if(!editando||!podeConcederAcesso)return;
+    supabase.from("acessos_filial").select("filial_id").eq("profile_id",editando.id)
+      .then(({data})=>setFiliaisExtras(new Set((data||[]).map(a=>a.filial_id))));
+  },[editando?.id]);
+
+  function toggleExtra(fid){
+    setFiliaisExtras(prev=>{
+      const next=new Set(prev);
+      if(next.has(fid))next.delete(fid);else next.add(fid);
+      return next;
+    });
+  }
+
+  async function sincronizarAcessosExtras(profileId){
+    if(!podeConcederAcesso)return{error:null};
+    const{error:errDel}=await supabase.from("acessos_filial").delete().eq("profile_id",profileId);
+    if(errDel)return{error:errDel};
+    const linhas=[...filiaisExtras].filter(fid=>fid!==filialId).map(fid=>({profile_id:profileId,filial_id:fid}));
+    if(linhas.length===0)return{error:null};
+    const{error:errIns}=await supabase.from("acessos_filial").insert(linhas);
+    return{error:errIns};
+  }
 
   async function salvar(){
     if(!name||!email){setError("Preencha nome e e-mail.");return;}
@@ -2270,8 +2461,10 @@ function ModalUsuario({onClose,onSaved,filiais,profile,editando}){
       if(!json.ok){setLoading(false);setError(json.error);return;}
       // matrícula não faz parte da Edge Function — grava direto (RLS já permite admin editar perfis no escopo)
       const{error:errMat}=await supabase.from("profiles").update({matricula:matricula.trim()||null}).eq("id",editando.id);
+      if(errMat){setLoading(false);setError(traduzErro(errMat));return;}
+      const{error:errAcesso}=await sincronizarAcessosExtras(editando.id);
       setLoading(false);
-      if(errMat){setError(traduzErro(errMat));return;}
+      if(errAcesso){setError("Perfil salvo, mas falhou ao salvar o acesso extra a filiais: "+traduzErro(errAcesso));return;}
       onSaved();
     }else{
       const resp=await fetch(`${SUPA_URL}/functions/v1/admin-create-user`,{
@@ -2284,7 +2477,9 @@ function ModalUsuario({onClose,onSaved,filiais,profile,editando}){
         const{error:errMat}=await supabase.from("profiles").update({matricula:matricula.trim()}).eq("id",json.user.id);
         if(errMat){setLoading(false);setError("Usuário criado, mas falhou ao salvar a matrícula: "+traduzErro(errMat));return;}
       }
+      const{error:errAcesso}=await sincronizarAcessosExtras(json.user.id);
       setLoading(false);
+      if(errAcesso){setError("Usuário criado, mas falhou ao salvar o acesso extra a filiais: "+traduzErro(errAcesso));return;}
       setResultado(json);
     }
   }
@@ -2314,11 +2509,24 @@ function ModalUsuario({onClose,onSaved,filiais,profile,editando}){
           </select>
         </Field>
         {userType!=="admin_geral"&&(
-          <Field label="Filial" required>
+          <Field label="Filial" required hint={userType==="admin_area"?"Filial da qual essa pessoa é gestora (aprova transferências para cá).":null}>
             <select value={filialId} onChange={e=>setFilialId(e.target.value)} style={inputStyle} disabled={profile.userType==="admin_area"}>
               <option value="">Selecione...</option>
               {filiais.map(f=><option key={f.id} value={f.id}>{f.nome}</option>)}
             </select>
+          </Field>
+        )}
+        {userType!=="admin_geral"&&podeConcederAcesso&&(
+          <Field label="Filiais com acesso extra" hint="Além da filial acima, em quais outras essa pessoa pode ver/operar o estoque (sem ser gestora de lá).">
+            <div style={{display:"flex",flexDirection:"column",gap:6,padding:"10px 12px",background:"#F9FAFB",borderRadius:9,border:"1px solid #F1F5F9"}}>
+              {filiais.filter(f=>f.id!==filialId).map(f=>(
+                <label key={f.id} style={{display:"flex",alignItems:"center",gap:8,fontSize:13,color:"#374151",cursor:"pointer"}}>
+                  <input type="checkbox" checked={filiaisExtras.has(f.id)} onChange={()=>toggleExtra(f.id)}/>
+                  {f.nome}
+                </label>
+              ))}
+              {filiais.filter(f=>f.id!==filialId).length===0&&<span style={{fontSize:12,color:"#9CA3AF"}}>Nenhuma outra filial cadastrada.</span>}
+            </div>
           </Field>
         )}
       </div>
@@ -2328,6 +2536,7 @@ function ModalUsuario({onClose,onSaved,filiais,profile,editando}){
 
 function GestaoUsuariosView({profile,filiais}){
   const[lista,setLista]=useState([]);
+  const[acessosExtras,setAcessosExtras]=useState({});
   const[loading,setLoading]=useState(true);
   const[novoAberto,setNovoAberto]=useState(false);
   const[editando,setEditando]=useState(null);
@@ -2340,6 +2549,12 @@ function GestaoUsuariosView({profile,filiais}){
     if(profile.userType==="admin_area")q=q.eq("filial_id",profile.filialId);
     const{data,error}=await q;
     if(!error)setLista(data||[]);
+    if(profile.userType==="admin_geral"){
+      const{data:acessos}=await supabase.from("acessos_filial").select("profile_id, filial:filial_id(nome)");
+      const map={};
+      (acessos||[]).forEach(a=>{(map[a.profile_id]=map[a.profile_id]||[]).push(a.filial?.nome);});
+      setAcessosExtras(map);
+    }
     setLoading(false);
   }
   useEffect(()=>{load();},[]);
@@ -2394,7 +2609,14 @@ function GestaoUsuariosView({profile,filiais}){
                 <div style={{fontSize:12,color:"#6B7280"}}>{u.email}</div>
               </div>
               <div style={{fontSize:12,color:"#374151",minWidth:150}}>{USER_TYPE_LABEL[u.user_type]}</div>
-              <div style={{fontSize:12,color:"#6B7280",minWidth:120}}>{u.filial?.nome||"Todas as filiais"}</div>
+              <div style={{fontSize:12,color:"#6B7280",minWidth:120}}>
+                {u.filial?.nome||"Todas as filiais"}
+                {acessosExtras[u.id]?.length>0&&(
+                  <span style={{display:"block",fontSize:10.5,color:BLUE,fontWeight:700,marginTop:2}}>
+                    + {acessosExtras[u.id].join(", ")}
+                  </span>
+                )}
+              </div>
               <div style={{fontSize:12,color:"#9CA3AF",minWidth:90}}>{u.matricula?`Mat. ${u.matricula}`:"—"}</div>
               <div style={{display:"flex",gap:6}}>
                 <button onClick={()=>setEditando(u)} title="Editar" style={{border:"1px solid #E5E7EB",background:"#fff",
@@ -2443,9 +2665,9 @@ function RelatoriosView({profile,filiais}){
 
   useEffect(()=>{
     let q=supabase.from("ferramentas_unidade").select("*, filial:filial_id(nome), colaborador_atual:colaborador_atual_id(name), catalogo:catalogo_id(nome)").eq("ativo",true);
-    if(profile.userType!=="admin_geral")q=q.eq("filial_id",profile.filialId);
+    if(profile.userType!=="admin_geral")q=q.in("filial_id",profile.filialIds);
     q.then(({data,error})=>{if(!error)setFerramentas(data||[]);setLoading(false);});
-  },[profile.filialId]);
+  },[profile.filialIds]);
 
   const hoje=new Date();hoje.setHours(0,0,0,0);
   const vencidas=ferramentas.filter(f=>f.data_proxima_afericao&&new Date(f.data_proxima_afericao)<hoje&&f.status!=="em_afericao");
@@ -2763,11 +2985,16 @@ function App(){
       setStatus("login");
       return;
     }
+    const{data:acessos}=await supabase.from("acessos_filial").select("filial_id, filial:filial_id(nome)").eq("profile_id",prof.id);
+    const extras=(acessos||[]).map(a=>({id:a.filial_id,nome:a.filial?.nome}));
+    const filiaisAcesso=prof.filial_id?[{id:prof.filial_id,nome:prof.filial?.nome},...extras]:extras;
+    const filialIds=filiaisAcesso.map(f=>f.id);
     setProfile({
       id:prof.id,name:prof.name,email:prof.email,userType:prof.user_type,
       filialId:prof.filial_id,filialNome:prof.filial?.nome,color:prof.color,
+      filialIds,filiaisAcesso,
     });
-    setActiveNav(prof.user_type==="colaborador"?"retiradas":"dashboard");
+    setActiveNav(prof.user_type==="colaborador"?"ferramentas":"dashboard");
     await Promise.all([loadFiliais(),loadCategorias(),loadCatalogos(),loadPessoas(),loadNotifications(prof.id)]);
     setStatus("ready");
   }
@@ -2814,7 +3041,6 @@ function App(){
   }else{
     switch(activeNav){
       case "dashboard": content=<DashboardView {...commonProps}/>; break;
-      case "retiradas": content=<RetiradasView filiais={filiais}/>; break;
       case "ferramentas": content=<FerramentasView {...commonProps} reloadCatalogos={loadCatalogos}/>; break;
       case "movimentacoes": content=<MovimentacoesView {...commonProps}/>; break;
       case "manutencoes": content=<ManutencoesView {...commonProps}/>; break;
