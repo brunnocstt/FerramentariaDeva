@@ -1,6 +1,6 @@
 # Ferramentaria Deva — Arquitetura do Sistema
 
-> **Versão:** 3.0 — 14/08/2026 (Rodada 3: acesso multi-filial, transferências, tela única de Estoque)
+> **Versão:** 4.0 — 17/08/2026 (Rodada 4: CRUD de filiais/categorias, remoção de Manutenções/Auditorias, exportação, localização física)
 > **Autor:** Albus Data
 > **URL de produção:** https://ferramentariadeva.albusdata.com.br (pendente configuração de DNS — ver seção 16)
 
@@ -44,7 +44,7 @@ Segue a **mesma arquitetura** do sistema irmão "Deva · Gestão de Projetos": m
 | **Frontend** | React (via Babel standalone) | 18 — sem build step |
 | **Estilo** | Tailwind CSS | CDN (JIT) |
 | **Ícones** | Lucide React | CDN (esm.sh) |
-| **Exportação** | SheetJS (xlsx) | CDN (unpkg) |
+| **Exportação** | SheetJS (xlsx) + jsPDF/jspdf-autotable (pdf) | CDN (unpkg) |
 | **Autenticação** | Supabase Auth | Email + senha + Turnstile |
 | **Banco de dados** | PostgreSQL (Supabase) | Projeto `zdwkdfsqxkcrnkovdvba` ("FerramentariaDeva") |
 | **API serverless** | Supabase Edge Functions | Deno runtime |
@@ -103,11 +103,14 @@ index.html
     ├── Auth          LoginScreen (Turnstile), ResetPasswordScreen
     ├── Shell         Sidebar (idêntica ao app de Gestão de Projetos), UserFooterMenu, NotificationPanel
     └── Views         DashboardView (+ UsoAoVivoPanel), FerramentasView — tela "Estoque"
-                       (catálogo, estoque, TransferenciasPendentesPanel, ModalNovaRetirada/
-                       ModalDevolucao com RetiradaColaborador/DevolucaoColaborador),
-                       MovimentacoesView, ManutencoesView, AuditoriasView/AuditoriaExecucaoView,
-                       GestaoUsuariosView, RelatoriosView, ConfiguracoesView
+                       (catálogo, estoque, exportação Excel/PDF, TransferenciasPendentesPanel,
+                       ModalNovaRetirada/ModalDevolucao com RetiradaColaborador/DevolucaoColaborador,
+                       ações de reparo via FerramentaDetalheModal), MovimentacoesView,
+                       GestaoUsuariosView, RelatoriosView, ConfiguracoesView (Filiais/Categorias
+                       editáveis)
 ```
+
+> `AuditoriasView`/`AuditoriaExecucaoView`/`ModalNovaAuditoria` continuam definidos no arquivo mas **sem rota nem item de menu** — a Deva usa o app da Especifer (fornecedora) pra auditoria, não este. `ManutencoesView` foi removida de vez: o que fazia (enviar/retornar de conserto) virou ação direta no detalhe da ferramenta.
 
 Reset de senha usa o mesmo padrão definitivo do app de referência: token customizado de 64 caracteres via `?reset_token=`, capturado **antes** de qualquer código Supabase rodar, independente do fluxo nativo `PASSWORD_RECOVERY` (incompatível com SPA sem build). Não existe `reset-password.html` separado neste app — o fluxo native de recovery link não é usado, só o token customizado.
 
@@ -119,13 +122,13 @@ Reset de senha usa o mesmo padrão definitivo do app de referência: token custo
 
 | Tabela | Descrição | RLS |
 |---|---|---|
-| `filiais` | As 6 filiais com oficina (Betim, Juiz de Fora, Montes Claros, Pouso Alegre, Divinópolis, Belo Horizonte), cada uma com `codigo_barras` opcional (prefixo do código de barras do crachá — ver seção 7) | ✅ |
-| `categorias_ferramenta` | Categorias de ferramenta (editável em Configurações), cada uma com flags `requer_afericao` e `controle_individual` | ✅ |
+| `filiais` | As 6 filiais com oficina (Betim, Juiz de Fora, Montes Claros, Pouso Alegre, Divinópolis, Belo Horizonte), cada uma com `codigo_barras` opcional (prefixo do código de barras do crachá — ver seção 7). Editável (nome/código) e excluível (soft delete via `ativo=false`) em Configurações → Filiais. | ✅ |
+| `categorias_ferramenta` | Categorias de ferramenta, cada uma com flags `requer_afericao` e `controle_individual`. Editável e excluível (soft delete via `ativo=false`) em Configurações → Categorias. | ✅ |
 | `profiles` | Perfil de cada usuário, vinculado a `auth.users`, com `matricula` (crachá) opcional — única só **dentro da filial** (`unique(filial_id,matricula)`), não globalmente | ✅ |
 | `acessos_filial` | Acesso operacional **extra** de uma pessoa a filiais além da própria (`profile_id, filial_id`) — ver seção 8 | ✅ |
 | `ferramentas_catalogo` | Cadastro **global** de tipos/modelos de ferramenta (não tem filial) | ✅ |
-| `ferramentas_unidade` | Unidade física individual de um tipo do catálogo, numa filial, com código próprio | ✅ |
-| `estoque_pool` | Quantidade total de um tipo do catálogo numa filial, sem código individual | ✅ |
+| `ferramentas_unidade` | Unidade física individual de um tipo do catálogo, numa filial, com código próprio e `localizacao` opcional (armário/prateleira/gaveta) | ✅ |
+| `estoque_pool` | Quantidade total de um tipo do catálogo numa filial, sem código individual, com `localizacao` opcional | ✅ |
 | `emprestimos` | Retiradas/devoluções contra um `estoque_pool` (múltiplas simultâneas) | ✅ |
 | `transferencias_ferramenta` | Pedido de transferência de uma `ferramenta_unidade` entre filiais, com aprovação — ver seção 8 | ✅ |
 | `movimentacoes` | Log **append-only** de toda ação sobre uma `ferramenta_unidade` | ✅ |
@@ -266,7 +269,7 @@ Usuário protegido: `bruno.cesar@deva.com.br` não pode ser desativado por ningu
                     baixada ◄─────────reativacao(admin)─────────┘
 ```
 
-Cada seta é validada por `fn_valida_transicao_movimentacao` (BEFORE INSERT) e aplicada por `fn_aplicar_movimentacao` (AFTER INSERT). Envio/retorno de conserto passam pela tabela `manutencoes` (motivo, fornecedor, prazo) e replicam automaticamente uma `movimentacao` espelho para manter o histórico único — um sinalizador de sessão (`app.internal_write`) impede que o cliente insira esses dois tipos de movimentação diretamente, contornando o formulário estruturado de Manutenções.
+Cada seta é validada por `fn_valida_transicao_movimentacao` (BEFORE INSERT) e aplicada por `fn_aplicar_movimentacao` (AFTER INSERT). Envio/retorno de conserto (rotulado "Reparo" na UI) passam pela tabela `manutencoes` (motivo, fornecedor, prazo) e replicam automaticamente uma `movimentacao` espelho para manter o histórico único — um sinalizador de sessão (`app.internal_write`) impede que o cliente insira esses dois tipos de movimentação diretamente, contornando o fluxo estruturado (ações "Enviar para Reparo"/"Registrar Retorno do Reparo" em `FerramentaDetalheModal`, que abrem `ModalEnviarConserto`/`ModalRetornoConsertoPorFerramenta`).
 
 Essa máquina de estados vale só para `ferramentas_unidade` (individuais). Itens em pool têm uma máquina bem mais simples, própria de `emprestimos`: `retirada` (INSERT, validada por saldo) → `devolucao` (UPDATE de `data_devolucao`, validada contra devolução duplicada) — ver seção 6.
 
@@ -331,4 +334,4 @@ Ações fora do alcance do agente, que dependem do usuário:
 
 ---
 
-*Documentação gerada em 07/08/2026, atualizada em 13/08/2026 (Rodada 2) e 14/08/2026 (Rodada 3). Para atualizar, edite este arquivo e faça `git push`.*
+*Documentação gerada em 07/08/2026, atualizada em 13/08/2026 (Rodada 2), 14/08/2026 (Rodada 3) e 17/08/2026 (Rodada 4). Para atualizar, edite este arquivo e faça `git push`.*
