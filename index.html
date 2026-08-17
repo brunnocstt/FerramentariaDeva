@@ -2848,6 +2848,38 @@ function FilialRow({filial,onEditar,onExcluir}){
   );
 }
 
+function ModalNovaFilial({onClose,onSaved}){
+  const[nome,setNome]=useState("");
+  const[codigo,setCodigo]=useState("");
+  const[loading,setLoading]=useState(false);
+  const[error,setError]=useState("");
+
+  async function salvar(){
+    if(!nome.trim()){setError("Preencha o nome.");return;}
+    setLoading(true);setError("");
+    const{error:err}=await supabase.from("filiais").insert({nome:nome.trim(),codigo_barras:codigo.trim()||null});
+    setLoading(false);
+    if(err){setError(traduzErro(err));return;}
+    onSaved();
+  }
+
+  return(
+    <Modal title="Nova Filial" onClose={onClose}
+      footer={<><BtnSecondary onClick={onClose}>Cancelar</BtnSecondary>
+        <BtnPrimary onClick={salvar} loading={loading}>Cadastrar</BtnPrimary></>}>
+      <ErrorBox>{error}</ErrorBox>
+      <div style={{display:"flex",flexDirection:"column",gap:14}}>
+        <Field label="Nome" required>
+          <input value={nome} onChange={e=>setNome(e.target.value)} style={inputStyle} placeholder="Ex.: Betim"/>
+        </Field>
+        <Field label="Código da filial" hint="Primeira metade do código lido no crachá do colaborador (ex.: no código 055003000830, o código da filial é 55003). Pode preencher depois, se ainda não souber.">
+          <input value={codigo} onChange={e=>setCodigo(e.target.value)} style={inputStyle} placeholder="Ex.: 55003"/>
+        </Field>
+      </div>
+    </Modal>
+  );
+}
+
 function ModalEditarFilial({filial,onClose,onSaved}){
   const[nome,setNome]=useState(filial.nome);
   const[codigo,setCodigo]=useState(filial.codigo_barras||"");
@@ -2987,23 +3019,13 @@ function ModalEditarCategoria({categoria,onClose,onSaved}){
 
 function ConfiguracoesView({profile,filiais,categorias,pessoas,reloadFiliais,reloadCategorias,activeSection,setActiveSection}){
   const isMobile=useIsMobile();
-  const[novoNome,setNovoNome]=useState("");
-  const[loading,setLoading]=useState(false);
   const[error,setError]=useState("");
   const[catError,setCatError]=useState("");
   const[editandoFilial,setEditandoFilial]=useState(null);
   const[editandoCategoria,setEditandoCategoria]=useState(null);
   const[novaCategoriaAberta,setNovaCategoriaAberta]=useState(false);
+  const[novaFilialAberta,setNovaFilialAberta]=useState(false);
   const isAdminGeral=profile.userType==="admin_geral";
-
-  async function addFilial(){
-    if(!novoNome.trim())return;
-    setLoading(true);setError("");
-    const{error:err}=await supabase.from("filiais").insert({nome:novoNome.trim()});
-    setLoading(false);
-    if(err){setError(err.message);return;}
-    setNovoNome("");reloadFiliais();
-  }
 
   async function excluirFilial(f){
     if(!window.confirm(`Excluir a filial "${f.nome}"? Ela some das listas, mas o histórico de ferramentas continua íntegro.`))return;
@@ -3080,18 +3102,17 @@ function ConfiguracoesView({profile,filiais,categorias,pessoas,reloadFiliais,rel
           )}
 
           {activeSection==="filiais"&&isAdminGeral&&(<>
-            <p style={{fontSize:15,fontWeight:800,color:"#111827",margin:"0 0 2px"}}>Filiais</p>
-            <p style={{fontSize:12,color:"#9CA3AF",margin:"0 0 16px"}}>
+            <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:12,marginBottom:2}}>
+              <p style={{fontSize:15,fontWeight:800,color:"#111827",margin:0}}>Filiais</p>
+              <BtnPrimary onClick={()=>setNovaFilialAberta(true)}><Plus size={15}/>Nova Filial</BtnPrimary>
+            </div>
+            <p style={{fontSize:12,color:"#9CA3AF",margin:"2px 0 16px"}}>
               Filiais com oficina cadastradas no sistema. O "Código da filial" é a primeira metade do código lido
               no crachá do colaborador (ex.: no código 055003000830, a filial é 55003) — necessário para a tela de Retiradas
               reconhecer automaticamente a filial ao ler o crachá.
             </p>
             <div style={{maxWidth:520}}>
               <ErrorBox>{error}</ErrorBox>
-              <div style={{display:"flex",gap:8,marginBottom:16}}>
-                <input value={novoNome} onChange={e=>setNovoNome(e.target.value)} style={inputStyle} placeholder="Nome da nova filial"/>
-                <BtnPrimary onClick={addFilial} loading={loading}>Adicionar</BtnPrimary>
-              </div>
               <div style={{display:"flex",flexDirection:"column",gap:8}}>
                 {filiais.map(f=><FilialRow key={f.id} filial={f}
                   onEditar={()=>setEditandoFilial(f)} onExcluir={()=>excluirFilial(f)}/>)}
@@ -3136,6 +3157,8 @@ function ConfiguracoesView({profile,filiais,categorias,pessoas,reloadFiliais,rel
         onClose={()=>setEditandoCategoria(null)} onSaved={()=>{setEditandoCategoria(null);reloadCategorias();}}/>}
       {novaCategoriaAberta&&<ModalNovaCategoria
         onClose={()=>setNovaCategoriaAberta(false)} onSaved={()=>{setNovaCategoriaAberta(false);reloadCategorias();}}/>}
+      {novaFilialAberta&&<ModalNovaFilial
+        onClose={()=>setNovaFilialAberta(false)} onSaved={()=>{setNovaFilialAberta(false);reloadFiliais();}}/>}
     </div>
   );
 }
