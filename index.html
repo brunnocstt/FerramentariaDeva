@@ -606,13 +606,13 @@ function UserFooterMenu({currentUser,collapsed,onViewProfile,onLogout}){
       <button onClick={toggle}
         style={{width:"100%",height:46,position:"relative",borderRadius:9,
           border:"none",background:open?"#18181B":"transparent",cursor:"pointer",textAlign:"left"}}>
-        <div style={{position:"absolute",left:8,top:"50%",transform:"translateY(-50%)",width:30,height:30,borderRadius:"50%",
+        <div style={{position:"absolute",left:6,top:"50%",transform:"translateY(-50%)",width:30,height:30,borderRadius:"50%",
           background:currentUser.color||BLUE,flexShrink:0,
           display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:800,color:"#fff"}}>
           {getInitials(currentUser.name)}
         </div>
         {!collapsed&&(
-          <div style={{position:"absolute",left:48,right:8,top:"50%",transform:"translateY(-50%)",minWidth:0,
+          <div style={{position:"absolute",left:44,right:8,top:"50%",transform:"translateY(-50%)",minWidth:0,
             opacity:0,animation:"fadeIn .22s ease .08s forwards"}}>
             <div style={{fontSize:12.5,fontWeight:700,color:"#fff",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{currentUser.name}</div>
             <div style={{fontSize:10.5,color:"#71717A",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{currentUser.filialNome||"Todas as filiais"}</div>
