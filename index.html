@@ -1435,6 +1435,42 @@ function ModalEstoqueDetalhe({estoque,onClose,onChanged,profile,filiais}){
   );
 }
 
+function ModalGrupoUnidades({grupo,categorias,onClose,onSelectUnidade}){
+  const categoriaObj=categorias.find(c=>c.id===grupo.categoriaId);
+  const disponiveis=grupo.itens.filter(u=>u.status==="disponivel").length;
+  return(
+    <Modal title={grupo.nome} onClose={onClose} width={560}>
+      <div style={{marginBottom:16,display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
+        <div style={{fontSize:12,color:"#6B7280"}}>
+          {categoriaObj?.nome||"—"} · {grupo.itens.length} unidade(s) cadastrada(s)
+        </div>
+        <span style={{fontSize:12,fontWeight:800,color:disponiveis>0?"#059669":"#B91C1C"}}>
+          {disponiveis} disponível(is)
+        </span>
+      </div>
+      <div style={{display:"flex",flexDirection:"column",gap:8,maxHeight:460,overflowY:"auto"}}>
+        {grupo.itens.map(u=>(
+          <button key={u.id} onClick={()=>onSelectUnidade(u)} className="lift"
+            style={{textAlign:"left",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,
+              padding:"11px 14px",borderRadius:10,border:"1px solid #F1F5F9",background:"#FAFAFA",cursor:"pointer"}}>
+            <div style={{minWidth:0}}>
+              <div style={{fontSize:13,fontWeight:700,color:"#111827"}}>{u.codigo}</div>
+              <div style={{fontSize:11.5,color:"#9CA3AF",marginTop:2,display:"flex",alignItems:"center",gap:5}}>
+                {u.localizacao?<><MapPin size={11}/>{u.localizacao}</>:"Sem localização definida"}
+                {u.colaborador_atual?.name?` · com ${u.colaborador_atual.name}`:""}
+              </div>
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
+              <StatusBadge status={u.status}/>
+              <ChevronRight size={15} color="#9CA3AF"/>
+            </div>
+          </button>
+        ))}
+      </div>
+    </Modal>
+  );
+}
+
 function TransferenciasPendentesPanel({profile,onChanged}){
   const[lista,setLista]=useState([]);
   const[loading,setLoading]=useState(true);
@@ -1518,6 +1554,7 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
   const[filtroFilial,setFiltroFilial]=useState("");
   const[filtroCategoria,setFiltroCategoria]=useState("");
   const[selecionada,setSelecionada]=useState(null);
+  const[grupoSelecionado,setGrupoSelecionado]=useState(null);
   const[estoqueSelecionado,setEstoqueSelecionado]=useState(null);
   const[novaAberta,setNovaAberta]=useState(false);
   const[retiradaAberta,setRetiradaAberta]=useState(false);
@@ -1559,12 +1596,33 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
     return estoques.filter(e=>(e.catalogo?.nome||"").toLowerCase().includes(t));
   },[estoques,busca,filtroStatus]);
 
+  // Visão de dois níveis: agrupa as unidades individuais por catálogo — a lista mostra
+  // um item por tipo de ferramenta (quantas temos daquela), e o clique abre o detalhe
+  // com os códigos e localizações individuais de cada unidade.
+  const gruposUnidades=useMemo(()=>{
+    const porCatalogo=new Map();
+    unidadesFiltradas.forEach(u=>{
+      const key=u.catalogo_id;
+      if(!porCatalogo.has(key)){
+        porCatalogo.set(key,{catalogoId:key,nome:u.catalogo?.nome||"—",categoriaId:u.catalogo?.categoria_id,itens:[]});
+      }
+      porCatalogo.get(key).itens.push(u);
+    });
+    return Array.from(porCatalogo.values()).sort((a,b)=>a.nome.localeCompare(b.nome));
+  },[unidadesFiltradas]);
+
   const pessoasFilial=useMemo(()=>{
-    const fid=selecionada?.filial_id;
+    const fid=(selecionada||grupoSelecionado?.itens?.[0])?.filial_id;
     return pessoas.filter(p=>p.filial_id===fid);
-  },[pessoas,selecionada]);
+  },[pessoas,selecionada,grupoSelecionado]);
 
   const totalItens=unidadesFiltradas.length+estoquesFiltrados.length;
+  const totalLinhas=gruposUnidades.length+estoquesFiltrados.length;
+
+  function abrirGrupo(grupo){
+    if(grupo.itens.length===1)setSelecionada(grupo.itens[0]);
+    else setGrupoSelecionado(grupo);
+  }
 
   function exportarEstoque(formato){
     const filialNome=id=>filiais.find(f=>f.id===id)?.nome||"";
@@ -1609,7 +1667,7 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:20,flexWrap:"wrap",gap:12}}>
         <div>
           <h1 style={{fontSize:22,fontWeight:800,color:"#111827",margin:"0 0 4px"}}>Estoque</h1>
-          <p style={{fontSize:13,color:"#6B7280",margin:0}}>{totalItens} item(ns)</p>
+          <p style={{fontSize:13,color:"#6B7280",margin:0}}>{totalLinhas} tipo(s) de ferramenta · {totalItens} unidade(s)</p>
         </div>
         <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
           <BtnSecondary onClick={()=>setDevolucaoAberta(true)}><ScanLine size={15}/>Devolver Ferramenta</BtnSecondary>
@@ -1672,19 +1730,24 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
               </div>
             </button>
           ))}
-          {unidadesFiltradas.map(f=>(
-            <button key={f.id} onClick={()=>setSelecionada(f)} className="lift"
-              style={{textAlign:"left",background:"#fff",border:"1px solid #F1F5F9",borderRadius:14,padding:14,cursor:"pointer"}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
-                <div>
-                  <div style={{fontSize:11,color:"#9CA3AF",fontWeight:700}}>{f.codigo}</div>
-                  <div style={{fontSize:14,fontWeight:700,color:"#111827"}}>{f.catalogo?.nome}</div>
+          {gruposUnidades.map(g=>{
+            const disponiveis=g.itens.filter(u=>u.status==="disponivel").length;
+            const unico=g.itens.length===1?g.itens[0]:null;
+            return(
+              <button key={g.catalogoId} onClick={()=>abrirGrupo(g)} className="lift"
+                style={{textAlign:"left",background:"#fff",border:"1px solid #F1F5F9",borderRadius:14,padding:14,cursor:"pointer"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
+                  <div>
+                    <div style={{fontSize:11,color:"#9CA3AF",fontWeight:700}}>{unico?unico.codigo:`${g.itens.length} UNIDADES`}</div>
+                    <div style={{fontSize:14,fontWeight:700,color:"#111827"}}>{g.nome}</div>
+                  </div>
+                  {unico?<StatusBadge status={unico.status}/>:
+                    <span style={{fontSize:12,fontWeight:800,color:disponiveis>0?"#059669":"#B91C1C"}}>{disponiveis} disp.</span>}
                 </div>
-                <StatusBadge status={f.status}/>
-              </div>
-              {f.colaborador_atual?.name&&<div style={{fontSize:12,color:"#6B7280",marginTop:6}}>Com: {f.colaborador_atual.name}</div>}
-            </button>
-          ))}
+                {unico?.colaborador_atual?.name&&<div style={{fontSize:12,color:"#6B7280",marginTop:6}}>Com: {unico.colaborador_atual.name}</div>}
+              </button>
+            );
+          })}
         </div>
       ):(
         <div style={{background:"#fff",border:"1px solid #F1F5F9",borderRadius:16,overflow:"hidden"}}>
@@ -1713,18 +1776,27 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
                   <td style={{padding:"12px 16px"}}><ChevronRight size={15} color="#9CA3AF"/></td>
                 </tr>
               ))}
-              {unidadesFiltradas.map(f=>(
-                <tr key={f.id} className="row-hover" onClick={()=>setSelecionada(f)}
-                  style={{borderTop:"1px solid #F1F5F9",cursor:"pointer"}}>
-                  <td style={{padding:"12px 16px",fontSize:13,fontWeight:700,color:"#111827"}}>{f.codigo}</td>
-                  <td style={{padding:"12px 16px",fontSize:13,color:"#374151"}}>{f.catalogo?.nome}</td>
-                  <td style={{padding:"12px 16px",fontSize:13,color:"#6B7280"}}>{categorias.find(c=>c.id===f.catalogo?.categoria_id)?.nome||"—"}</td>
-                  <td style={{padding:"12px 16px"}}><StatusBadge status={f.status}/></td>
-                  <td style={{padding:"12px 16px",fontSize:13,color:"#374151"}}>{f.colaborador_atual?.name||"—"}</td>
-                  <td style={{padding:"12px 16px",fontSize:13,color:"#374151"}}>{fmtDate(f.data_proxima_afericao)}</td>
-                  <td style={{padding:"12px 16px"}}><ChevronRight size={15} color="#9CA3AF"/></td>
-                </tr>
-              ))}
+              {gruposUnidades.map(g=>{
+                const disponiveis=g.itens.filter(u=>u.status==="disponivel").length;
+                const unico=g.itens.length===1?g.itens[0]:null;
+                return(
+                  <tr key={g.catalogoId} className="row-hover" onClick={()=>abrirGrupo(g)}
+                    style={{borderTop:"1px solid #F1F5F9",cursor:"pointer"}}>
+                    <td style={{padding:"12px 16px",fontSize:13,fontWeight:700,color:"#111827"}}>
+                      {unico?unico.codigo:`${g.itens.length} unidades`}
+                    </td>
+                    <td style={{padding:"12px 16px",fontSize:13,color:"#374151"}}>{g.nome}</td>
+                    <td style={{padding:"12px 16px",fontSize:13,color:"#6B7280"}}>{categorias.find(c=>c.id===g.categoriaId)?.nome||"—"}</td>
+                    <td style={{padding:"12px 16px"}}>
+                      {unico?<StatusBadge status={unico.status}/>:
+                        <span style={{fontSize:12,fontWeight:800,color:disponiveis>0?"#059669":"#B91C1C"}}>{disponiveis}/{g.itens.length} disponível</span>}
+                    </td>
+                    <td style={{padding:"12px 16px",fontSize:13,color:"#374151"}}>{unico?(unico.colaborador_atual?.name||"—"):"—"}</td>
+                    <td style={{padding:"12px 16px",fontSize:13,color:"#374151"}}>{unico?fmtDate(unico.data_proxima_afericao):"—"}</td>
+                    <td style={{padding:"12px 16px"}}><ChevronRight size={15} color="#9CA3AF"/></td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -1740,6 +1812,9 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
       {estoqueSelecionado&&<ModalEstoqueDetalhe estoque={estoqueSelecionado} profile={profile} filiais={filiais}
         onClose={()=>setEstoqueSelecionado(null)}
         onChanged={()=>{load();setEstoqueSelecionado(null);}}/>}
+      {grupoSelecionado&&<ModalGrupoUnidades grupo={grupoSelecionado} categorias={categorias}
+        onClose={()=>setGrupoSelecionado(null)}
+        onSelectUnidade={u=>{setGrupoSelecionado(null);setSelecionada(u);}}/>}
       {novaAberta&&<ModalNovaFerramenta filiais={filiais} categorias={categorias} catalogos={catalogos} profile={profile}
         onClose={()=>setNovaAberta(false)} onSaved={()=>{setNovaAberta(false);reloadCatalogos&&reloadCatalogos();load();}}/>}
       {retiradaAberta&&<ModalNovaRetirada filiais={filiais}
