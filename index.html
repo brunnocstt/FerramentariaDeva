@@ -1620,26 +1620,34 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
 
       {profile.userType!=="colaborador"&&<TransferenciasPendentesPanel profile={profile} onChanged={load}/>}
 
-      <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:18}}>
-        <div style={{position:"relative",flex:"1 1 220px"}}>
-          <Search size={14} color="#9CA3AF" style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)"}}/>
-          <input value={busca} onChange={e=>setBusca(e.target.value)} placeholder="Buscar por código ou nome..."
-            style={{...inputStyle,paddingLeft:34}}/>
-        </div>
-        <select value={filtroStatus} onChange={e=>setFiltroStatus(e.target.value)} style={{...inputStyle,width:"auto"}}>
-          <option value="">Todos os status</option>
-          {Object.entries(STATUS_FERRAMENTA_INFO).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
-        </select>
-        {(profile.userType==="admin_geral"||profile.filiaisAcesso.length>1)&&(
-          <select value={filtroFilial} onChange={e=>setFiltroFilial(e.target.value)} style={{...inputStyle,width:"auto"}}>
-            <option value="">Todas as filiais</option>
-            {(profile.userType==="admin_geral"?filiais:profile.filiaisAcesso).map(f=><option key={f.id} value={f.id}>{f.nome}</option>)}
+      <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:18,alignItems:"flex-end"}}>
+        <Field label="Buscar">
+          <div style={{position:"relative",minWidth:220}}>
+            <Search size={14} color="#9CA3AF" style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)"}}/>
+            <input value={busca} onChange={e=>setBusca(e.target.value)} placeholder="Código ou nome..."
+              style={{...inputStyle,paddingLeft:34}}/>
+          </div>
+        </Field>
+        <Field label="Status">
+          <select value={filtroStatus} onChange={e=>setFiltroStatus(e.target.value)} style={{...inputStyle,width:"auto"}}>
+            <option value="">Todos os status</option>
+            {Object.entries(STATUS_FERRAMENTA_INFO).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
           </select>
+        </Field>
+        {(profile.userType==="admin_geral"||profile.filiaisAcesso.length>1)&&(
+          <Field label="Filial">
+            <select value={filtroFilial} onChange={e=>setFiltroFilial(e.target.value)} style={{...inputStyle,width:"auto"}}>
+              <option value="">Todas as filiais</option>
+              {(profile.userType==="admin_geral"?filiais:profile.filiaisAcesso).map(f=><option key={f.id} value={f.id}>{f.nome}</option>)}
+            </select>
+          </Field>
         )}
-        <select value={filtroCategoria} onChange={e=>setFiltroCategoria(e.target.value)} style={{...inputStyle,width:"auto"}}>
-          <option value="">Todas as categorias</option>
-          {categorias.map(c=><option key={c.id} value={c.id}>{c.nome}</option>)}
-        </select>
+        <Field label="Categoria">
+          <select value={filtroCategoria} onChange={e=>setFiltroCategoria(e.target.value)} style={{...inputStyle,width:"auto"}}>
+            <option value="">Todas as categorias</option>
+            {categorias.map(c=><option key={c.id} value={c.id}>{c.nome}</option>)}
+          </select>
+        </Field>
         <div style={{display:"flex",gap:8,marginLeft:"auto"}}>
           <BtnSecondary onClick={()=>exportarEstoque("excel")}><Download size={14}/>Exportar Excel</BtnSecondary>
           <BtnSecondary onClick={()=>exportarEstoque("pdf")}><FileText size={14}/>Exportar PDF</BtnSecondary>
