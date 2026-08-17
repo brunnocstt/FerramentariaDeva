@@ -1670,9 +1670,11 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
           <p style={{fontSize:13,color:"#6B7280",margin:0}}>{totalLinhas} tipo(s) de ferramenta · {totalItens} unidade(s)</p>
         </div>
         <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          <BtnSecondary onClick={()=>exportarEstoque("excel")}><FileSpreadsheet size={14}/>Exportar Excel</BtnSecondary>
+          <BtnSecondary onClick={()=>exportarEstoque("pdf")}><FileText size={14}/>Exportar PDF</BtnSecondary>
+          <BtnPrimary onClick={()=>setRetiradaAberta(true)}><ScanLine size={15}/>Retirar Ferramenta</BtnPrimary>
           <BtnSecondary onClick={()=>setDevolucaoAberta(true)}><ScanLine size={15}/>Devolver Ferramenta</BtnSecondary>
-          <BtnPrimary onClick={()=>setRetiradaAberta(true)}><ScanLine size={15}/>Nova Retirada</BtnPrimary>
-          {isAdmin&&<BtnPrimary onClick={()=>setNovaAberta(true)}><Plus size={15}/>Nova Ferramenta</BtnPrimary>}
+          {isAdmin&&<BtnSecondary onClick={()=>setNovaAberta(true)}><Plus size={15}/>Nova Ferramenta</BtnSecondary>}
         </div>
       </div>
 
@@ -1706,10 +1708,6 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
             {categorias.map(c=><option key={c.id} value={c.id}>{c.nome}</option>)}
           </select>
         </Field>
-        <div style={{display:"flex",gap:8,marginLeft:"auto"}}>
-          <BtnSecondary onClick={()=>exportarEstoque("excel")}><FileSpreadsheet size={14}/>Exportar Excel</BtnSecondary>
-          <BtnSecondary onClick={()=>exportarEstoque("pdf")}><FileText size={14}/>Exportar PDF</BtnSecondary>
-        </div>
       </div>
 
       {loading?<div style={{padding:60,textAlign:"center"}}><Spinner size={20}/></div>:
