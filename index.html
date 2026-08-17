@@ -2880,6 +2880,70 @@ function ModalEditarFilial({filial,onClose,onSaved}){
   );
 }
 
+function SeletorControleEstoque({value,onChange,travadoPorAfericao}){
+  return(
+    <Field label="Como controlar o estoque dessa categoria?">
+      <div style={{display:"flex",gap:8}}>
+        <button type="button" onClick={()=>onChange(true)}
+          style={{flex:1,padding:"10px",borderRadius:9,textAlign:"left",cursor:"pointer",
+            border:`1.5px solid ${value?BLUE:"#E5E7EB"}`,background:value?"#EEF2FF":"#fff"}}>
+          <div style={{fontWeight:700,fontSize:12.5,color:value?BLUE:"#374151"}}>Por unidade</div>
+          <div style={{fontWeight:500,fontSize:11,color:value?BLUE:"#9CA3AF",marginTop:2}}>Cada ferramenta tem um código próprio (ex.: FER-001)</div>
+        </button>
+        <button type="button" disabled={travadoPorAfericao} onClick={()=>onChange(false)}
+          style={{flex:1,padding:"10px",borderRadius:9,textAlign:"left",
+            cursor:travadoPorAfericao?"not-allowed":"pointer",
+            border:`1.5px solid ${!value?BLUE:"#E5E7EB"}`,background:!value?"#EEF2FF":"#fff"}}>
+          <div style={{fontWeight:700,fontSize:12.5,color:!value?BLUE:travadoPorAfericao?"#D1D5DB":"#374151"}}>Por quantidade</div>
+          <div style={{fontWeight:500,fontSize:11,color:!value?BLUE:"#D1D5DB",marginTop:2}}>Só a soma total, sem código individual</div>
+        </button>
+      </div>
+      {travadoPorAfericao&&<div style={{fontSize:11,color:"#9CA3AF",marginTop:6}}>Categorias com aferição precisam ser controladas por unidade.</div>}
+    </Field>
+  );
+}
+
+function ModalNovaCategoria({onClose,onSaved}){
+  const[nome,setNome]=useState("");
+  const[requerAfericao,setRequerAfericao]=useState(false);
+  const[controleIndividual,setControleIndividual]=useState(true);
+  const[loading,setLoading]=useState(false);
+  const[error,setError]=useState("");
+
+  function onChangeRequerAfericao(v){
+    setRequerAfericao(v);
+    if(v)setControleIndividual(true); // categoria com aferição exige controle individual (CHECK do banco)
+  }
+
+  async function salvar(){
+    if(!nome.trim()){setError("Preencha o nome.");return;}
+    setLoading(true);setError("");
+    const{error:err}=await supabase.from("categorias_ferramenta")
+      .insert({nome:nome.trim(),requer_afericao:requerAfericao,controle_individual:controleIndividual});
+    setLoading(false);
+    if(err){setError(traduzErro(err));return;}
+    onSaved();
+  }
+
+  return(
+    <Modal title="Nova Categoria" onClose={onClose}
+      footer={<><BtnSecondary onClick={onClose}>Cancelar</BtnSecondary>
+        <BtnPrimary onClick={salvar} loading={loading}>Cadastrar</BtnPrimary></>}>
+      <ErrorBox>{error}</ErrorBox>
+      <div style={{display:"flex",flexDirection:"column",gap:14}}>
+        <Field label="Nome" required>
+          <input value={nome} onChange={e=>setNome(e.target.value)} style={inputStyle} placeholder="Ex.: Ferramentas manuais"/>
+        </Field>
+        <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:13,color:"#374151"}}>
+          <input type="checkbox" checked={requerAfericao} onChange={e=>onChangeRequerAfericao(e.target.checked)}/>
+          Ferramentas dessa categoria exigem controle de aferição
+        </label>
+        <SeletorControleEstoque value={controleIndividual} onChange={setControleIndividual} travadoPorAfericao={requerAfericao}/>
+      </div>
+    </Modal>
+  );
+}
+
 function ModalEditarCategoria({categoria,onClose,onSaved}){
   const[nome,setNome]=useState(categoria.nome);
   const[requerAfericao,setRequerAfericao]=useState(categoria.requer_afericao);
@@ -2915,12 +2979,7 @@ function ModalEditarCategoria({categoria,onClose,onSaved}){
           <input type="checkbox" checked={requerAfericao} onChange={e=>onChangeRequerAfericao(e.target.checked)}/>
           Ferramentas dessa categoria exigem controle de aferição
         </label>
-        <label style={{display:"flex",alignItems:"center",gap:8,cursor:requerAfericao?"not-allowed":"pointer",fontSize:13,
-          color:requerAfericao?"#9CA3AF":"#374151"}}>
-          <input type="checkbox" checked={controleIndividual} disabled={requerAfericao}
-            onChange={e=>setControleIndividual(e.target.checked)}/>
-          Cada unidade tem código próprio (desmarque pra controlar só por quantidade)
-        </label>
+        <SeletorControleEstoque value={controleIndividual} onChange={setControleIndividual} travadoPorAfericao={requerAfericao}/>
       </div>
     </Modal>
   );
@@ -2931,12 +2990,10 @@ function ConfiguracoesView({profile,filiais,categorias,pessoas,reloadFiliais,rel
   const[novoNome,setNovoNome]=useState("");
   const[loading,setLoading]=useState(false);
   const[error,setError]=useState("");
-  const[catNome,setCatNome]=useState("");
-  const[catRequerAfericao,setCatRequerAfericao]=useState(false);
-  const[catLoading,setCatLoading]=useState(false);
   const[catError,setCatError]=useState("");
   const[editandoFilial,setEditandoFilial]=useState(null);
   const[editandoCategoria,setEditandoCategoria]=useState(null);
+  const[novaCategoriaAberta,setNovaCategoriaAberta]=useState(false);
   const isAdminGeral=profile.userType==="admin_geral";
 
   async function addFilial(){
@@ -2954,15 +3011,6 @@ function ConfiguracoesView({profile,filiais,categorias,pessoas,reloadFiliais,rel
     const{error:err}=await supabase.from("filiais").update({ativo:false}).eq("id",f.id);
     if(err){setError(traduzErro(err));return;}
     reloadFiliais();
-  }
-
-  async function addCategoria(){
-    if(!catNome.trim())return;
-    setCatLoading(true);setCatError("");
-    const{error:err}=await supabase.from("categorias_ferramenta").insert({nome:catNome.trim(),requer_afericao:catRequerAfericao});
-    setCatLoading(false);
-    if(err){setCatError(err.message);return;}
-    setCatNome("");setCatRequerAfericao(false);reloadCategorias();
   }
 
   async function excluirCategoria(c){
@@ -3052,20 +3100,15 @@ function ConfiguracoesView({profile,filiais,categorias,pessoas,reloadFiliais,rel
           </>)}
 
           {activeSection==="categorias"&&isAdminGeral&&(<>
-            <p style={{fontSize:15,fontWeight:800,color:"#111827",margin:"0 0 2px"}}>Categorias de Ferramenta</p>
-            <p style={{fontSize:12,color:"#9CA3AF",margin:"0 0 16px"}}>
+            <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:12,marginBottom:2}}>
+              <p style={{fontSize:15,fontWeight:800,color:"#111827",margin:0}}>Categorias de Ferramenta</p>
+              <BtnPrimary onClick={()=>setNovaCategoriaAberta(true)}><Plus size={15}/>Nova Categoria</BtnPrimary>
+            </div>
+            <p style={{fontSize:12,color:"#9CA3AF",margin:"2px 0 16px"}}>
               Categorias marcadas como "exige aferição" pedem data de aferição e liberam a ação "Enviar p/ Aferição" nas ferramentas dessa categoria.
             </p>
             <div style={{maxWidth:480}}>
               <ErrorBox>{catError}</ErrorBox>
-              <div style={{display:"flex",gap:8,marginBottom:10,flexWrap:"wrap"}}>
-                <input value={catNome} onChange={e=>setCatNome(e.target.value)} style={{...inputStyle,flex:"1 1 200px"}} placeholder="Nome da nova categoria"/>
-                <BtnPrimary onClick={addCategoria} loading={catLoading}>Adicionar</BtnPrimary>
-              </div>
-              <label style={{display:"flex",alignItems:"center",gap:8,marginBottom:16,cursor:"pointer",fontSize:13,color:"#374151"}}>
-                <input type="checkbox" checked={catRequerAfericao} onChange={e=>setCatRequerAfericao(e.target.checked)}/>
-                Ferramentas dessa categoria exigem controle de aferição
-              </label>
               <div style={{display:"flex",flexDirection:"column",gap:8}}>
                 {categorias.map(c=>(
                   <div key={c.id} style={{padding:"10px 14px",background:"#fff",border:"1px solid #F1F5F9",borderRadius:10,
@@ -3091,6 +3134,8 @@ function ConfiguracoesView({profile,filiais,categorias,pessoas,reloadFiliais,rel
         onClose={()=>setEditandoFilial(null)} onSaved={()=>{setEditandoFilial(null);reloadFiliais();}}/>}
       {editandoCategoria&&<ModalEditarCategoria categoria={editandoCategoria}
         onClose={()=>setEditandoCategoria(null)} onSaved={()=>{setEditandoCategoria(null);reloadCategorias();}}/>}
+      {novaCategoriaAberta&&<ModalNovaCategoria
+        onClose={()=>setNovaCategoriaAberta(false)} onSaved={()=>{setNovaCategoriaAberta(false);reloadCategorias();}}/>}
     </div>
   );
 }
