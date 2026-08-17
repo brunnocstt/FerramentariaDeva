@@ -731,7 +731,7 @@ function Sidebar({currentUser,activeNav,setActiveNav,onLogout,onViewProfile,
                 color:notifOpen?BLUE:"#71717A",transition:"background .15s,color .15s"}}
               onMouseEnter={e=>{if(!notifOpen){e.currentTarget.style.background="#18181B";e.currentTarget.style.color="#D4D4D8";}}}
               onMouseLeave={e=>{if(!notifOpen){e.currentTarget.style.background="transparent";e.currentTarget.style.color="#71717A";}}}>
-              <span style={{position:"absolute",left:14,top:"50%",transform:"translateY(-50%)",width:28,height:28,
+              <span style={{position:"absolute",left:6,top:"50%",transform:"translateY(-50%)",width:28,height:28,
                 display:"flex",alignItems:"center",justifyContent:"center"}}>
                 <Bell size={17} color={notifOpen?BLUE:"currentColor"}/>
                 {unread>0&&(
@@ -743,7 +743,7 @@ function Sidebar({currentUser,activeNav,setActiveNav,onLogout,onViewProfile,
                 )}
               </span>
               {!collapsed&&(
-                <span style={{position:"absolute",left:52,right:10,top:"50%",transform:"translateY(-50%)",textAlign:"left",
+                <span style={{position:"absolute",left:44,right:10,top:"50%",transform:"translateY(-50%)",textAlign:"left",
                   fontSize:13,fontWeight:500,color:"inherit",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",
                   opacity:0,animation:"fadeIn .22s ease .08s forwards"}}>
                   Notificações{unread>0?` (${unread})`:""}
