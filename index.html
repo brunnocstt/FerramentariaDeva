@@ -96,7 +96,7 @@ import{
   Lock,Mail,EyeOff,EyeIcon,Check,AlertCircle,RefreshCw,Building2,
   Clock,CheckCircle2,Pencil,Trash2,Menu,Filter,Wrench,PackageCheck,
   ClipboardList,ArrowLeftRight,Hash,MapPin,AlertTriangle,LayoutDashboard,
-  FileText,UserCheck,PackagePlus,PackageX,Ban,History,Tag,ScanLine
+  FileText,UserCheck,PackagePlus,PackageX,Ban,History,Tag,ScanLine,FileSpreadsheet
 }from "https://esm.sh/lucide-react?deps=react@18";
 
 /* ── SUPABASE ────────────────────────────────────── */
@@ -1649,7 +1649,7 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
           </select>
         </Field>
         <div style={{display:"flex",gap:8,marginLeft:"auto"}}>
-          <BtnSecondary onClick={()=>exportarEstoque("excel")}><Download size={14}/>Exportar Excel</BtnSecondary>
+          <BtnSecondary onClick={()=>exportarEstoque("excel")}><FileSpreadsheet size={14}/>Exportar Excel</BtnSecondary>
           <BtnSecondary onClick={()=>exportarEstoque("pdf")}><FileText size={14}/>Exportar PDF</BtnSecondary>
         </div>
       </div>
@@ -2091,7 +2091,7 @@ function MovimentacoesView({profile,filiais}){
           <h1 style={{fontSize:22,fontWeight:800,color:"#111827",margin:"0 0 4px"}}>Movimentações</h1>
           <p style={{fontSize:13,color:"#6B7280",margin:0}}>Histórico completo de ações — registro imutável.</p>
         </div>
-        <BtnSecondary onClick={exportar}><Download size={14}/>Exportar Excel</BtnSecondary>
+        <BtnSecondary onClick={exportar}><FileSpreadsheet size={14}/>Exportar Excel</BtnSecondary>
       </div>
       <select value={filtroTipo} onChange={e=>setFiltroTipo(e.target.value)} style={{...inputStyle,width:"auto",marginBottom:18}}>
         <option value="">Todos os tipos</option>
@@ -2733,7 +2733,7 @@ function RelatoriosView({profile,filiais}){
       {loading?<div style={{padding:60,textAlign:"center"}}><Spinner size={20}/></div>:(
         <>
           <div style={{display:"flex",justifyContent:"flex-end",marginBottom:12}}>
-            <BtnSecondary onClick={exportarAfericoes}><Download size={14}/>Exportar Excel</BtnSecondary>
+            <BtnSecondary onClick={exportarAfericoes}><FileSpreadsheet size={14}/>Exportar Excel</BtnSecondary>
           </div>
           <div style={{marginBottom:24}}>
             <h3 style={{fontSize:14,fontWeight:800,color:"#B91C1C",margin:"0 0 10px"}}>Vencidas ({vencidas.length})</h3>
