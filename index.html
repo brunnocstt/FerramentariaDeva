@@ -2769,6 +2769,7 @@ function MeuPerfilCard({profile}){
   const[novaSenha,setNovaSenha]=useState("");
   const[confirmar,setConfirmar]=useState("");
   const[mostrarSenha,setMostrarSenha]=useState(false);
+  const[mostrarConfirmar,setMostrarConfirmar]=useState(false);
   const[loading,setLoading]=useState(false);
   const[msg,setMsg]=useState("");
   const[error,setError]=useState("");
@@ -2804,7 +2805,7 @@ function MeuPerfilCard({profile}){
           <div style={{position:"relative"}}>
             <input type={mostrarSenha?"text":"password"} value={novaSenha} onChange={e=>setNovaSenha(e.target.value)}
               style={{...inputStyle,paddingRight:38}}/>
-            <button type="button" onClick={()=>setMostrarSenha(v=>!v)} title={mostrarSenha?"Ocultar senha":"Mostrar senha"}
+            <button type="button" tabIndex={-1} onClick={()=>setMostrarSenha(v=>!v)} title={mostrarSenha?"Ocultar senha":"Mostrar senha"}
               style={{position:"absolute",right:8,top:"50%",transform:"translateY(-50%)",border:"none",background:"none",
                 cursor:"pointer",color:"#9CA3AF",display:"flex",alignItems:"center",padding:4}}>
               {mostrarSenha?<EyeOff size={16}/>:<Eye size={16}/>}
@@ -2812,7 +2813,15 @@ function MeuPerfilCard({profile}){
           </div>
         </Field>
         <Field label="Confirmar nova senha">
-          <input type={mostrarSenha?"text":"password"} value={confirmar} onChange={e=>setConfirmar(e.target.value)} style={inputStyle}/>
+          <div style={{position:"relative"}}>
+            <input type={mostrarConfirmar?"text":"password"} value={confirmar} onChange={e=>setConfirmar(e.target.value)}
+              style={{...inputStyle,paddingRight:38}}/>
+            <button type="button" tabIndex={-1} onClick={()=>setMostrarConfirmar(v=>!v)} title={mostrarConfirmar?"Ocultar senha":"Mostrar senha"}
+              style={{position:"absolute",right:8,top:"50%",transform:"translateY(-50%)",border:"none",background:"none",
+                cursor:"pointer",color:"#9CA3AF",display:"flex",alignItems:"center",padding:4}}>
+              {mostrarConfirmar?<EyeOff size={16}/>:<Eye size={16}/>}
+            </button>
+          </div>
         </Field>
         <BtnPrimary onClick={trocarSenha} loading={loading}>Salvar nova senha</BtnPrimary>
       </div>
@@ -2829,7 +2838,7 @@ function FilialRow({filial,onEditar,onExcluir}){
       display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
       <div style={{flex:"1 1 160px",minWidth:0}}>
         <div style={{fontSize:13.5,fontWeight:600,color:"#111827"}}>{filial.nome}</div>
-        <div style={{fontSize:11,color:"#9CA3AF"}}>{filial.codigo_barras?`Código de barras: ${filial.codigo_barras}`:"Sem código de barras cadastrado"}</div>
+        <div style={{fontSize:11,color:"#9CA3AF"}}>{filial.codigo_barras?`Código da filial: ${filial.codigo_barras}`:"Sem código da filial cadastrado"}</div>
       </div>
       <div style={{display:"flex",gap:6}}>
         <button onClick={onEditar} title="Editar" style={iconBtnStyle}><Pencil size={13}/></button>
@@ -2863,7 +2872,7 @@ function ModalEditarFilial({filial,onClose,onSaved}){
         <Field label="Nome" required>
           <input value={nome} onChange={e=>setNome(e.target.value)} style={inputStyle}/>
         </Field>
-        <Field label="Código de barras" hint="Primeira metade do código lido no crachá do colaborador (ex.: no código 055003000830, o código da filial é 55003).">
+        <Field label="Código da filial" hint="Primeira metade do código lido no crachá do colaborador (ex.: no código 055003000830, o código da filial é 55003).">
           <input value={codigo} onChange={e=>setCodigo(e.target.value)} style={inputStyle} placeholder="Ex.: 55003"/>
         </Field>
       </div>
@@ -3025,7 +3034,7 @@ function ConfiguracoesView({profile,filiais,categorias,pessoas,reloadFiliais,rel
           {activeSection==="filiais"&&isAdminGeral&&(<>
             <p style={{fontSize:15,fontWeight:800,color:"#111827",margin:"0 0 2px"}}>Filiais</p>
             <p style={{fontSize:12,color:"#9CA3AF",margin:"0 0 16px"}}>
-              Filiais com oficina cadastradas no sistema. O "Código de barras" é a primeira metade do código lido
+              Filiais com oficina cadastradas no sistema. O "Código da filial" é a primeira metade do código lido
               no crachá do colaborador (ex.: no código 055003000830, a filial é 55003) — necessário para a tela de Retiradas
               reconhecer automaticamente a filial ao ler o crachá.
             </p>
