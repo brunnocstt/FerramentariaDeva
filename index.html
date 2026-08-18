@@ -1539,7 +1539,7 @@ function ModalEstoqueDetalhe({estoque,onClose,onChanged,profile,filiais}){
         </EditableInfoBox>
       </div>
 
-      {isAdmin&&profile.filiaisAcesso.length>1&&estoque.quantidade_disponivel>0&&(
+      {profile.filiaisAcesso.length>1&&estoque.quantidade_disponivel>0&&(
         <div style={{marginBottom:20}}>
           <div style={{fontSize:11,fontWeight:700,color:"#9CA3AF",textTransform:"uppercase",marginBottom:8,letterSpacing:".4px"}}>Ações</div>
           <ChipButton Icon={ArrowLeftRight} onClick={()=>setTransferindo(true)}>Transferir para Outra Filial</ChipButton>
