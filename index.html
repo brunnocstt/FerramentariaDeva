@@ -1196,7 +1196,7 @@ function FerramentaDetalheModal({ferramenta,onClose,onChanged,profile,filiais,ca
 
   return(
     <Modal title="Detalhe da Ferramenta" onClose={onClose} width={560}>
-      <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",marginBottom:16}}>
+      <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:10,marginBottom:16}}>
         <div>
           <div style={{fontSize:11,color:"#9CA3AF",fontWeight:700,textTransform:"uppercase",marginBottom:2}}>{ferramenta.codigo}</div>
           <div style={{fontSize:18,fontWeight:800,color:"#111827",display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
@@ -1206,7 +1206,19 @@ function FerramentaDetalheModal({ferramenta,onClose,onChanged,profile,filiais,ca
             <MapPin size={12}/>{filialNome}{categoriaObj?` · ${categoriaObj.nome}`:""}
           </div>
         </div>
-        <StatusBadge status={ferramenta.status}/>
+        <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:8,flexShrink:0}}>
+          <StatusBadge status={ferramenta.status}/>
+          {isAdmin&&(
+            <div style={{display:"flex",gap:6}}>
+              <IconToggleButton Icon={Pencil} onClick={()=>setEditando(true)} title="Editar dados cadastrais"/>
+              {profile.userType==="admin_geral"&&(
+                <IconToggleButton Icon={ShieldCheck} onClick={alternarObrigatoria} disabled={salvandoObrigatoria}
+                  active={ferramenta.catalogo?.obrigatoria}
+                  title={ferramenta.catalogo?.obrigatoria?"Desmarcar como obrigatória":"Marcar como obrigatória"}/>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}}>
@@ -1215,23 +1227,9 @@ function FerramentaDetalheModal({ferramenta,onClose,onChanged,profile,filiais,ca
         {requerAfericao&&<>
           <InfoBox label="Última aferição" value={fmtDate(ferramenta.data_ultima_afericao)}/>
           <InfoBox label="Próxima aferição" value={fmtDate(ferramenta.data_proxima_afericao)}/>
-          <InfoBox label="Saída p/ aferição" value={fmtDate(ferramenta.data_saida_afericao)}/>
         </>}
+        {ferramenta.status==="em_afericao"&&<InfoBox label="Saída p/ aferição" value={fmtDate(ferramenta.data_saida_afericao)}/>}
       </div>
-
-      {isAdmin&&(
-        <div style={{marginBottom:20}}>
-          <div style={{fontSize:11,fontWeight:700,color:"#9CA3AF",textTransform:"uppercase",marginBottom:8,letterSpacing:".4px"}}>Cadastro</div>
-          <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
-            <ChipButton Icon={Pencil} onClick={()=>setEditando(true)}>Editar dados cadastrais</ChipButton>
-            {profile.userType==="admin_geral"&&(
-              <ChipButton Icon={ShieldCheck} onClick={alternarObrigatoria} disabled={salvandoObrigatoria}>
-                {ferramenta.catalogo?.obrigatoria?"Desmarcar como obrigatória":"Marcar como obrigatória"}
-              </ChipButton>
-            )}
-          </div>
-        </div>
-      )}
 
       {acoes.length>0&&(
         <div style={{marginBottom:20}}>
@@ -1343,6 +1341,95 @@ function ModalTransferencia({ferramenta,filiais,profile,onClose,onDone}){
     </Modal>
   );
 }
+function ModalTransferenciaEstoque({estoque,filiais,profile,onClose,onDone}){
+  const opcoesDestino=filiais.filter(f=>profile.filialIds.includes(f.id)&&f.id!==estoque.filial_id);
+  const[filialDestinoId,setFilialDestinoId]=useState(opcoesDestino.length===1?opcoesDestino[0].id:"");
+  const[quantidade,setQuantidade]=useState("");
+  const[motivo,setMotivo]=useState("");
+  const[loading,setLoading]=useState(false);
+  const[error,setError]=useState("");
+
+  async function confirmar(){
+    const qtd=parseInt(quantidade,10);
+    if(!filialDestinoId){setError("Selecione a filial de destino.");return;}
+    if(!qtd||qtd<=0){setError("Informe uma quantidade válida.");return;}
+    if(qtd>estoque.quantidade_disponivel){setError(`Só há ${estoque.quantidade_disponivel} unidade(s) disponível(is) pra transferir.`);return;}
+    setLoading(true);setError("");
+    const{error:err}=await supabase.from("transferencias_estoque").insert({
+      catalogo_id:estoque.catalogo_id,filial_origem_id:estoque.filial_id,filial_destino_id:filialDestinoId,
+      quantidade:qtd,motivo:motivo.trim()||null,
+    });
+    setLoading(false);
+    if(err){setError(err.message||"Não foi possível solicitar a transferência.");return;}
+    onDone();
+  }
+
+  return(
+    <Modal title="Transferir Estoque para Outra Filial" onClose={onClose}
+      footer={<><BtnSecondary onClick={onClose}>Cancelar</BtnSecondary>
+        <BtnPrimary onClick={confirmar} loading={loading}>Solicitar Transferência</BtnPrimary></>}>
+      <ErrorBox>{error}</ErrorBox>
+      <div style={{marginBottom:16,padding:12,borderRadius:10,background:"#F9FAFB",border:"1px solid #F1F5F9"}}>
+        <div style={{fontSize:14,fontWeight:700,color:"#111827"}}>{estoque.catalogo?.nome}</div>
+        <div style={{fontSize:11.5,color:"#9CA3AF",marginTop:2}}>{estoque.quantidade_disponivel} disponível(is) pra transferir</div>
+      </div>
+      <div style={{display:"flex",flexDirection:"column",gap:14}}>
+        <Field label="Filial de destino" required>
+          <select value={filialDestinoId} onChange={e=>setFilialDestinoId(e.target.value)} style={inputStyle}>
+            <option value="">Selecione...</option>
+            {opcoesDestino.map(f=><option key={f.id} value={f.id}>{f.nome}</option>)}
+          </select>
+        </Field>
+        <Field label="Quantidade" required>
+          <input type="number" min="1" max={estoque.quantidade_disponivel} value={quantidade}
+            onChange={e=>setQuantidade(e.target.value)} style={inputStyle} placeholder="Ex.: 2"/>
+        </Field>
+        <Field label="Motivo (opcional)">
+          <textarea value={motivo} onChange={e=>setMotivo(e.target.value)} style={{...inputStyle,minHeight:70,resize:"vertical"}}/>
+        </Field>
+        <p style={{fontSize:11.5,color:"#9CA3AF",margin:0}}>
+          A quantidade solicitada fica reservada (sai da disponibilidade da filial de origem) até um gestor da filial de destino decidir. Se rejeitada ou cancelada, volta pra origem.
+        </p>
+      </div>
+    </Modal>
+  );
+}
+function IconToggleButton({Icon,onClick,disabled,active,title}){
+  return(
+    <button onClick={onClick} disabled={disabled} title={title}
+      style={{display:"flex",alignItems:"center",justifyContent:"center",width:32,height:32,borderRadius:9,flexShrink:0,
+        border:`1.5px solid ${active?"#FDE68A":"#E5E7EB"}`,background:active?"#FEF3C7":"#fff",
+        color:active?"#B45309":"#6B7280",cursor:disabled?"default":"pointer",opacity:disabled?.5:1}}>
+      <Icon size={14}/>
+    </button>
+  );
+}
+function EditableInfoBox({label,value,editing,onEdit,children}){
+  return(
+    <div style={{padding:"9px 12px",borderRadius:9,background:"#F9FAFB",border:"1px solid #F1F5F9"}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:6,marginBottom:2}}>
+        <div style={{fontSize:10.5,color:"#9CA3AF",fontWeight:700,textTransform:"uppercase"}}>{label}</div>
+        {onEdit&&!editing&&(
+          <button onClick={onEdit} style={{border:"none",background:"none",padding:0,cursor:"pointer",color:"#9CA3AF",display:"flex",flexShrink:0}}>
+            <Pencil size={11}/>
+          </button>
+        )}
+      </div>
+      {editing?children:<div style={{fontSize:13,fontWeight:700,color:"#111827"}}>{value}</div>}
+    </div>
+  );
+}
+function EditInline({value,onChange,onSave,onCancel,saving,type}){
+  return(
+    <div style={{display:"flex",gap:4,alignItems:"center"}}>
+      <input type={type||"text"} min={type==="number"?0:undefined} value={value} onChange={onChange} autoFocus
+        onKeyDown={e=>{if(e.key==="Enter")onSave();if(e.key==="Escape")onCancel();}}
+        style={{width:0,flex:1,padding:"4px 6px",fontSize:13,fontWeight:700,border:"1.5px solid #93C5FD",borderRadius:6,outline:"none"}}/>
+      <button onClick={onSave} disabled={saving} style={{border:"none",background:"none",color:"#059669",cursor:saving?"default":"pointer",padding:2,display:"flex",flexShrink:0}}><Check size={15}/></button>
+      <button onClick={onCancel} style={{border:"none",background:"none",color:"#9CA3AF",cursor:"pointer",padding:2,display:"flex",flexShrink:0}}><X size={15}/></button>
+    </div>
+  );
+}
 function ChipButton({Icon,children,onClick,disabled,danger}){
   return(
     <button onClick={onClick} disabled={disabled}
@@ -1372,6 +1459,7 @@ function ModalEstoqueDetalhe({estoque,onClose,onChanged,profile,filiais}){
   const[ajustandoLocal,setAjustandoLocal]=useState(false);
   const[novaLocal,setNovaLocal]=useState(estoque.localizacao||"");
   const[salvandoLocal,setSalvandoLocal]=useState(false);
+  const[transferindo,setTransferindo]=useState(false);
   const[error,setError]=useState("");
   const[salvandoObrigatoria,setSalvandoObrigatoria]=useState(false);
   const isAdmin=profile.userType==="admin_geral"||profile.userType==="admin_area";
@@ -1420,49 +1508,41 @@ function ModalEstoqueDetalhe({estoque,onClose,onChanged,profile,filiais}){
   return(
     <Modal title="Estoque da Ferramenta" onClose={onClose} width={560}>
       <ErrorBox>{error}</ErrorBox>
-      <div style={{marginBottom:16}}>
-        <div style={{fontSize:18,fontWeight:800,color:"#111827",display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-          {estoque.catalogo?.nome}{estoque.catalogo?.obrigatoria&&<BadgeObrigatoria/>}
-        </div>
-        <div style={{fontSize:12,color:"#6B7280",marginTop:4,display:"flex",alignItems:"center",gap:5}}>
-          <MapPin size={12}/>{filialNome}
-        </div>
-      </div>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}}>
-        <InfoBox label="Quantidade total" value={estoque.quantidade_total}/>
-        <InfoBox label="Disponível" value={estoque.quantidade_disponivel}/>
-        <InfoBox label="Localização" value={estoque.localizacao||"—"}/>
-      </div>
-      {(profile.userType==="admin_geral"||isAdmin)&&(
-        <div style={{marginBottom:20}}>
-          <div style={{fontSize:11,fontWeight:700,color:"#9CA3AF",textTransform:"uppercase",marginBottom:8,letterSpacing:".4px"}}>Cadastro</div>
-          <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:(ajustando||ajustandoLocal)?12:0}}>
-            {profile.userType==="admin_geral"&&(
-              <ChipButton Icon={ShieldCheck} onClick={alternarObrigatoria} disabled={salvandoObrigatoria}>
-                {estoque.catalogo?.obrigatoria?"Desmarcar como obrigatória":"Marcar como obrigatória"}
-              </ChipButton>
-            )}
-            {isAdmin&&!ajustando&&<ChipButton Icon={Pencil} onClick={()=>setAjustando(true)}>Ajustar quantidade total</ChipButton>}
-            {isAdmin&&!ajustandoLocal&&<ChipButton Icon={MapPin} onClick={()=>setAjustandoLocal(true)}>Ajustar localização</ChipButton>}
+      <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:10,marginBottom:16}}>
+        <div>
+          <div style={{fontSize:18,fontWeight:800,color:"#111827",display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+            {estoque.catalogo?.nome}{estoque.catalogo?.obrigatoria&&<BadgeObrigatoria/>}
           </div>
-          {isAdmin&&ajustando&&(
-            <div style={{display:"flex",gap:8,alignItems:"flex-end",marginBottom:ajustandoLocal?12:0}}>
-              <Field label="Nova quantidade total">
-                <input type="number" min="0" value={novaQtd} onChange={e=>setNovaQtd(e.target.value)} style={inputStyle}/>
-              </Field>
-              <BtnPrimary onClick={salvarQtd} loading={salvandoQtd}>Salvar</BtnPrimary>
-              <BtnSecondary onClick={()=>setAjustando(false)}>Cancelar</BtnSecondary>
-            </div>
-          )}
-          {isAdmin&&ajustandoLocal&&(
-            <div style={{display:"flex",gap:8,alignItems:"flex-end"}}>
-              <Field label="Nova localização">
-                <input value={novaLocal} onChange={e=>setNovaLocal(e.target.value)} style={inputStyle} placeholder="Ex.: Armário 3, Gaveta 2"/>
-              </Field>
-              <BtnPrimary onClick={salvarLocal} loading={salvandoLocal}>Salvar</BtnPrimary>
-              <BtnSecondary onClick={()=>setAjustandoLocal(false)}>Cancelar</BtnSecondary>
-            </div>
-          )}
+          <div style={{fontSize:12,color:"#6B7280",marginTop:4,display:"flex",alignItems:"center",gap:5}}>
+            <MapPin size={12}/>{filialNome}
+          </div>
+        </div>
+        {profile.userType==="admin_geral"&&(
+          <IconToggleButton Icon={ShieldCheck} onClick={alternarObrigatoria} disabled={salvandoObrigatoria}
+            active={estoque.catalogo?.obrigatoria}
+            title={estoque.catalogo?.obrigatoria?"Desmarcar como obrigatória":"Marcar como obrigatória"}/>
+        )}
+      </div>
+
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}}>
+        <EditableInfoBox label="Quantidade total" value={estoque.quantidade_total}
+          editing={isAdmin&&ajustando} onEdit={isAdmin?()=>setAjustando(true):null}>
+          <EditInline type="number" value={novaQtd} onChange={e=>setNovaQtd(e.target.value)}
+            onSave={salvarQtd} onCancel={()=>setAjustando(false)} saving={salvandoQtd}/>
+        </EditableInfoBox>
+        <InfoBox label="Disponível" value={estoque.quantidade_disponivel}/>
+        <InfoBox label="Emprestada" value={estoque.quantidade_emprestada}/>
+        <EditableInfoBox label="Localização" value={estoque.localizacao||"—"}
+          editing={isAdmin&&ajustandoLocal} onEdit={isAdmin?()=>setAjustandoLocal(true):null}>
+          <EditInline value={novaLocal} onChange={e=>setNovaLocal(e.target.value)}
+            onSave={salvarLocal} onCancel={()=>setAjustandoLocal(false)} saving={salvandoLocal}/>
+        </EditableInfoBox>
+      </div>
+
+      {isAdmin&&profile.filiaisAcesso.length>1&&estoque.quantidade_disponivel>0&&(
+        <div style={{marginBottom:20}}>
+          <div style={{fontSize:11,fontWeight:700,color:"#9CA3AF",textTransform:"uppercase",marginBottom:8,letterSpacing:".4px"}}>Ações</div>
+          <ChipButton Icon={ArrowLeftRight} onClick={()=>setTransferindo(true)}>Transferir para Outra Filial</ChipButton>
         </div>
       )}
 
@@ -1497,6 +1577,10 @@ function ModalEstoqueDetalhe({estoque,onClose,onChanged,profile,filiais}){
           </div>
         </div>
       )}
+
+      {transferindo&&<ModalTransferenciaEstoque estoque={estoque} filiais={filiais} profile={profile}
+        onClose={()=>setTransferindo(false)}
+        onDone={()=>{setTransferindo(false);onChanged();}}/>}
     </Modal>
   );
 }
@@ -1546,10 +1630,19 @@ function TransferenciasPendentesPanel({profile,onChanged}){
 
   async function load(){
     setLoading(true);
-    const{data}=await supabase.from("transferencias_ferramenta")
-      .select("*, ferramenta:ferramenta_id(codigo,catalogo:catalogo_id(nome)), origem:filial_origem_id(nome), destino:filial_destino_id(nome), solicitante:solicitante_id(name)")
-      .eq("status","pendente").order("created_at",{ascending:false});
-    setLista(data||[]);
+    const[{data:dF},{data:dE}]=await Promise.all([
+      supabase.from("transferencias_ferramenta")
+        .select("*, ferramenta:ferramenta_id(codigo,catalogo:catalogo_id(nome)), origem:filial_origem_id(nome), destino:filial_destino_id(nome), solicitante:solicitante_id(name)")
+        .eq("status","pendente").order("created_at",{ascending:false}),
+      supabase.from("transferencias_estoque")
+        .select("*, catalogo:catalogo_id(nome), origem:filial_origem_id(nome), destino:filial_destino_id(nome), solicitante:solicitante_id(name)")
+        .eq("status","pendente").order("created_at",{ascending:false}),
+    ]);
+    const combinada=[
+      ...(dF||[]).map(t=>({...t,tipo:"ferramenta"})),
+      ...(dE||[]).map(t=>({...t,tipo:"estoque"})),
+    ].sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
+    setLista(combinada);
     setLoading(false);
   }
   useEffect(()=>{load();},[]);
@@ -1557,13 +1650,15 @@ function TransferenciasPendentesPanel({profile,onChanged}){
   useEffect(()=>{
     const ch=supabase.channel("transferencias-rt")
       .on("postgres_changes",{event:"*",schema:"public",table:"transferencias_ferramenta"},()=>load())
+      .on("postgres_changes",{event:"*",schema:"public",table:"transferencias_estoque"},()=>load())
       .subscribe();
     return()=>supabase.removeChannel(ch);
   },[]);
 
   async function decidir(t,status){
     setProcessando(t.id);setError("");
-    const{error:err}=await supabase.from("transferencias_ferramenta").update({status}).eq("id",t.id);
+    const tabela=t.tipo==="estoque"?"transferencias_estoque":"transferencias_ferramenta";
+    const{error:err}=await supabase.from(tabela).update({status}).eq("id",t.id);
     setProcessando(null);
     if(err){setError(err.message||"Não foi possível registrar a decisão.");return;}
     load();
@@ -1588,7 +1683,7 @@ function TransferenciasPendentesPanel({profile,onChanged}){
                 display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
                 <div>
                   <div style={{fontSize:13,fontWeight:700,color:"#111827"}}>
-                    {t.ferramenta?.codigo} — {t.ferramenta?.catalogo?.nome}
+                    {t.tipo==="estoque"?`${t.quantidade}× ${t.catalogo?.nome}`:`${t.ferramenta?.codigo} — ${t.ferramenta?.catalogo?.nome}`}
                   </div>
                   <div style={{fontSize:11.5,color:"#6B7280"}}>
                     {t.origem?.nome} → {t.destino?.nome} · solicitado por {t.solicitante?.name} em {fmtDateTime(t.created_at)}
@@ -1627,6 +1722,7 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
   const[novaAberta,setNovaAberta]=useState(false);
   const[retiradaAberta,setRetiradaAberta]=useState(false);
   const[devolucaoAberta,setDevolucaoAberta]=useState(false);
+  const[exportarAberto,setExportarAberto]=useState(false);
   const isAdmin=profile.userType==="admin_geral"||profile.userType==="admin_area";
 
   async function load(){
@@ -1747,11 +1843,6 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
         </div>
         <div style={{display:"flex",alignItems:"center",gap:isMobile?8:14,flexWrap:"wrap"}}>
           <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-            <BtnSecondary onClick={()=>exportarEstoque("excel")}><FileSpreadsheet size={14}/>Exportar Excel</BtnSecondary>
-            <BtnSecondary onClick={()=>exportarEstoque("pdf")}><FileText size={14}/>Exportar PDF</BtnSecondary>
-          </div>
-          {!isMobile&&<div style={{width:1,height:24,background:"#E2E8F0",flexShrink:0}}/>}
-          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
             <BtnPrimary onClick={()=>setRetiradaAberta(true)}><ScanLine size={15}/>Retirar Ferramenta</BtnPrimary>
             <BtnPrimary onClick={()=>setDevolucaoAberta(true)}><ScanLine size={15}/>Devolver Ferramenta</BtnPrimary>
           </div>
@@ -1799,6 +1890,9 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
             <option value="nao">Só não obrigatórias</option>
           </select>
         </Field>
+        <div style={{marginLeft:isMobile?0:"auto"}}>
+          <BtnSecondary onClick={()=>setExportarAberto(true)}><Download size={14}/>Exportar</BtnSecondary>
+        </div>
       </div>
 
       {loading?<div style={{padding:60,textAlign:"center"}}><Spinner size={20}/></div>:
@@ -1922,7 +2016,20 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
         onClose={()=>setRetiradaAberta(false)} onFeito={load}/>}
       {devolucaoAberta&&<ModalDevolucao filiais={filiais}
         onClose={()=>setDevolucaoAberta(false)} onFeito={load}/>}
+      {exportarAberto&&<ModalExportar onClose={()=>setExportarAberto(false)}
+        onEscolher={formato=>{exportarEstoque(formato);setExportarAberto(false);}}/>}
     </div>
+  );
+}
+function ModalExportar({onClose,onEscolher}){
+  return(
+    <Modal title="Exportar Estoque" onClose={onClose} width={360}>
+      <p style={{fontSize:13,color:"#6B7280",margin:"0 0 16px"}}>Escolha o formato do relatório com os itens filtrados na tela.</p>
+      <div style={{display:"flex",flexDirection:"column",gap:8}}>
+        <ChipButton Icon={FileSpreadsheet} onClick={()=>onEscolher("excel")}>Excel (.xlsx)</ChipButton>
+        <ChipButton Icon={FileText} onClick={()=>onEscolher("pdf")}>PDF</ChipButton>
+      </div>
+    </Modal>
   );
 }
 
