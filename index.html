@@ -1737,12 +1737,20 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
           <h1 style={{fontSize:22,fontWeight:800,color:"#111827",margin:"0 0 4px"}}>Estoque</h1>
           <p style={{fontSize:13,color:"#6B7280",margin:0}}>{totalLinhas} tipo(s) de ferramenta · {totalItens} unidade(s)</p>
         </div>
-        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-          <BtnSecondary onClick={()=>exportarEstoque("excel")}><FileSpreadsheet size={14}/>Exportar Excel</BtnSecondary>
-          <BtnSecondary onClick={()=>exportarEstoque("pdf")}><FileText size={14}/>Exportar PDF</BtnSecondary>
-          <BtnPrimary onClick={()=>setRetiradaAberta(true)}><ScanLine size={15}/>Retirar Ferramenta</BtnPrimary>
-          <BtnPrimary onClick={()=>setDevolucaoAberta(true)}><ScanLine size={15}/>Devolver Ferramenta</BtnPrimary>
-          {isAdmin&&<BtnSecondary onClick={()=>setNovaAberta(true)}><Plus size={15}/>Nova Ferramenta</BtnSecondary>}
+        <div style={{display:"flex",alignItems:"center",gap:isMobile?8:14,flexWrap:"wrap"}}>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            <BtnSecondary onClick={()=>exportarEstoque("excel")}><FileSpreadsheet size={14}/>Exportar Excel</BtnSecondary>
+            <BtnSecondary onClick={()=>exportarEstoque("pdf")}><FileText size={14}/>Exportar PDF</BtnSecondary>
+          </div>
+          {!isMobile&&<div style={{width:1,height:24,background:"#E2E8F0",flexShrink:0}}/>}
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            <BtnPrimary onClick={()=>setRetiradaAberta(true)}><ScanLine size={15}/>Retirar Ferramenta</BtnPrimary>
+            <BtnPrimary onClick={()=>setDevolucaoAberta(true)}><ScanLine size={15}/>Devolver Ferramenta</BtnPrimary>
+          </div>
+          {isAdmin&&<>
+            {!isMobile&&<div style={{width:1,height:24,background:"#E2E8F0",flexShrink:0}}/>}
+            <BtnSecondary onClick={()=>setNovaAberta(true)}><Plus size={15}/>Nova Ferramenta</BtnSecondary>
+          </>}
         </div>
       </div>
 
