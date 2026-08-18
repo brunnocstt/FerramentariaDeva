@@ -206,6 +206,15 @@ function BadgeObrigatoria(){
     </span>
   );
 }
+function BadgeNaoObrigatoria(){
+  return(
+    <span style={{display:"inline-flex",alignItems:"center",gap:4,padding:"3px 8px",borderRadius:99,
+      background:"#F3F4F6",color:"#9CA3AF",fontSize:10.5,fontWeight:800,whiteSpace:"nowrap",
+      textTransform:"uppercase",letterSpacing:".3px"}}>
+      Não obrigatória
+    </span>
+  );
+}
 
 /* ── LOGO ────────────────────────────────────────── */
 function Logo({color="white",height=20}){
@@ -1839,7 +1848,7 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
                   <td style={{padding:"12px 16px",fontSize:13,fontWeight:700,color:"#9CA3AF"}}>—</td>
                   <td style={{padding:"12px 16px",fontSize:13,color:"#374151"}}>{e.catalogo?.nome}</td>
                   <td style={{padding:"12px 16px",fontSize:13,color:"#6B7280"}}>{categorias.find(c=>c.id===e.catalogo?.categoria_id)?.nome||"—"}</td>
-                  <td style={{padding:"12px 16px"}}>{e.catalogo?.obrigatoria&&<BadgeObrigatoria/>}</td>
+                  <td style={{padding:"12px 16px"}}>{e.catalogo?.obrigatoria?<BadgeObrigatoria/>:<BadgeNaoObrigatoria/>}</td>
                   <td style={{padding:"12px 16px"}}>
                     <span style={{fontSize:12,fontWeight:800,color:e.quantidade_disponivel>0?"#059669":"#B91C1C"}}>
                       {e.quantidade_disponivel}/{e.quantidade_total} disponíveis
@@ -1861,7 +1870,7 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
                     </td>
                     <td style={{padding:"12px 16px",fontSize:13,color:"#374151"}}>{g.nome}</td>
                     <td style={{padding:"12px 16px",fontSize:13,color:"#6B7280"}}>{categorias.find(c=>c.id===g.categoriaId)?.nome||"—"}</td>
-                    <td style={{padding:"12px 16px"}}>{g.obrigatoria&&<BadgeObrigatoria/>}</td>
+                    <td style={{padding:"12px 16px"}}>{g.obrigatoria?<BadgeObrigatoria/>:<BadgeNaoObrigatoria/>}</td>
                     <td style={{padding:"12px 16px"}}>
                       <span style={{fontSize:12,fontWeight:800,color:disponiveis>0?"#059669":"#B91C1C"}}>{disponiveis}/{g.itens.length} disponíveis</span>
                     </td>
