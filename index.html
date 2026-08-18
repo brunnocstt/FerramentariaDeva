@@ -197,6 +197,16 @@ function StatusBadge({status}){
   );
 }
 
+function BadgeObrigatoria(){
+  return(
+    <span style={{display:"inline-flex",alignItems:"center",gap:4,padding:"3px 8px",borderRadius:99,
+      background:"#FEF3C7",color:"#B45309",fontSize:10.5,fontWeight:800,whiteSpace:"nowrap",
+      textTransform:"uppercase",letterSpacing:".3px"}}>
+      <ShieldCheck size={11}/>Obrigatória
+    </span>
+  );
+}
+
 /* ── LOGO ────────────────────────────────────────── */
 function Logo({color="white",height=20}){
   const w=Math.round(183*height/15);
@@ -908,6 +918,7 @@ function ModalNovaFerramenta({onClose,onSaved,filiais,categorias,catalogos,profi
   const[catalogoId,setCatalogoId]=useState(editandoUnidade?.catalogo_id||"");
   const[novoTipoNome,setNovoTipoNome]=useState("");
   const[novoTipoCategoriaId,setNovoTipoCategoriaId]=useState("");
+  const[novoTipoObrigatoria,setNovoTipoObrigatoria]=useState(false);
   const[codigo,setCodigo]=useState(editandoUnidade?.codigo||"");
   const[quantidade,setQuantidade]=useState("");
   const filiaisPermitidas=profile.userType==="admin_geral"?filiais:filiais.filter(f=>profile.filialIds.includes(f.id));
@@ -945,7 +956,7 @@ function ModalNovaFerramenta({onClose,onSaved,filiais,categorias,catalogos,profi
       if(!novoTipoNome.trim()){setError("Preencha o nome da nova ferramenta.");return;}
       setLoading(true);
       const{data,error:err}=await supabase.from("ferramentas_catalogo")
-        .insert({nome:novoTipoNome.trim(),categoria_id:novoTipoCategoriaId||null}).select().single();
+        .insert({nome:novoTipoNome.trim(),categoria_id:novoTipoCategoriaId||null,obrigatoria:novoTipoObrigatoria}).select().single();
       if(err){setLoading(false);setError(traduzErro(err));return;}
       finalCatalogoId=data.id;
     }
@@ -999,6 +1010,10 @@ function ModalNovaFerramenta({onClose,onSaved,filiais,categorias,catalogos,profi
                 {categorias.map(c=><option key={c.id} value={c.id}>{c.nome}</option>)}
               </select>
             </Field>
+            <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:13,color:"#374151"}}>
+              <input type="checkbox" checked={novoTipoObrigatoria} onChange={e=>setNovoTipoObrigatoria(e.target.checked)}/>
+              Ferramenta obrigatória (checklist Iveco/Especifer)
+            </label>
             {isAdminGeral&&<button type="button" onClick={()=>setModoNovoTipo(false)}
               style={{border:"none",background:"none",color:BLUE,fontSize:12,fontWeight:700,cursor:"pointer",padding:0,textAlign:"left"}}>
               ← Usar uma ferramenta já cadastrada
@@ -1122,7 +1137,15 @@ function FerramentaDetalheModal({ferramenta,onClose,onChanged,profile,filiais,ca
   const[loadingHist,setLoadingHist]=useState(true);
   const[acao,setAcao]=useState(null);
   const[editando,setEditando]=useState(false);
+  const[salvandoObrigatoria,setSalvandoObrigatoria]=useState(false);
   const isAdmin=profile.userType==="admin_geral"||profile.userType==="admin_area";
+
+  async function alternarObrigatoria(){
+    setSalvandoObrigatoria(true);
+    await supabase.from("ferramentas_catalogo").update({obrigatoria:!ferramenta.catalogo?.obrigatoria}).eq("id",ferramenta.catalogo_id);
+    setSalvandoObrigatoria(false);
+    onChanged();
+  }
 
   async function loadHist(){
     setLoadingHist(true);
@@ -1167,7 +1190,9 @@ function FerramentaDetalheModal({ferramenta,onClose,onChanged,profile,filiais,ca
       <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",marginBottom:16}}>
         <div>
           <div style={{fontSize:11,color:"#9CA3AF",fontWeight:700,textTransform:"uppercase",marginBottom:2}}>{ferramenta.codigo}</div>
-          <div style={{fontSize:18,fontWeight:800,color:"#111827"}}>{ferramenta.catalogo?.nome}</div>
+          <div style={{fontSize:18,fontWeight:800,color:"#111827",display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+            {ferramenta.catalogo?.nome}{ferramenta.catalogo?.obrigatoria&&<BadgeObrigatoria/>}
+          </div>
           <div style={{fontSize:12,color:"#6B7280",marginTop:4,display:"flex",alignItems:"center",gap:5}}>
             <MapPin size={12}/>{filialNome}{categoriaObj?` · ${categoriaObj.nome}`:""}
           </div>
@@ -1186,10 +1211,18 @@ function FerramentaDetalheModal({ferramenta,onClose,onChanged,profile,filiais,ca
       </div>
 
       {isAdmin&&(
-        <button onClick={()=>setEditando(true)} style={{display:"flex",alignItems:"center",gap:6,border:"none",
-          background:"none",color:BLUE,fontSize:12,fontWeight:700,cursor:"pointer",padding:0,marginBottom:16}}>
-          <Pencil size={12}/>Editar dados cadastrais
-        </button>
+        <div style={{display:"flex",gap:16,flexWrap:"wrap",marginBottom:16}}>
+          <button onClick={()=>setEditando(true)} style={{display:"flex",alignItems:"center",gap:6,border:"none",
+            background:"none",color:BLUE,fontSize:12,fontWeight:700,cursor:"pointer",padding:0}}>
+            <Pencil size={12}/>Editar dados cadastrais
+          </button>
+          {profile.userType==="admin_geral"&&(
+            <button onClick={alternarObrigatoria} disabled={salvandoObrigatoria} style={{display:"flex",alignItems:"center",gap:6,border:"none",
+              background:"none",color:BLUE,fontSize:12,fontWeight:700,cursor:salvandoObrigatoria?"default":"pointer",padding:0,opacity:salvandoObrigatoria?.5:1}}>
+              <ShieldCheck size={12}/>{ferramenta.catalogo?.obrigatoria?"Desmarcar como obrigatória":"Marcar como obrigatória"}
+            </button>
+          )}
+        </div>
       )}
 
       {acoes.length>0&&(
@@ -1321,8 +1354,16 @@ function ModalEstoqueDetalhe({estoque,onClose,onChanged,profile,filiais}){
   const[novaLocal,setNovaLocal]=useState(estoque.localizacao||"");
   const[salvandoLocal,setSalvandoLocal]=useState(false);
   const[error,setError]=useState("");
+  const[salvandoObrigatoria,setSalvandoObrigatoria]=useState(false);
   const isAdmin=profile.userType==="admin_geral"||profile.userType==="admin_area";
   const filialNome=filiais.find(f=>f.id===estoque.filial_id)?.nome||"—";
+
+  async function alternarObrigatoria(){
+    setSalvandoObrigatoria(true);
+    await supabase.from("ferramentas_catalogo").update({obrigatoria:!estoque.catalogo?.obrigatoria}).eq("id",estoque.catalogo_id);
+    setSalvandoObrigatoria(false);
+    onChanged();
+  }
 
   async function load(){
     setLoadingEmp(true);
@@ -1361,7 +1402,9 @@ function ModalEstoqueDetalhe({estoque,onClose,onChanged,profile,filiais}){
     <Modal title="Estoque da Ferramenta" onClose={onClose} width={560}>
       <ErrorBox>{error}</ErrorBox>
       <div style={{marginBottom:16}}>
-        <div style={{fontSize:18,fontWeight:800,color:"#111827"}}>{estoque.catalogo?.nome}</div>
+        <div style={{fontSize:18,fontWeight:800,color:"#111827",display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+          {estoque.catalogo?.nome}{estoque.catalogo?.obrigatoria&&<BadgeObrigatoria/>}
+        </div>
         <div style={{fontSize:12,color:"#6B7280",marginTop:4,display:"flex",alignItems:"center",gap:5}}>
           <MapPin size={12}/>{filialNome}
         </div>
@@ -1371,6 +1414,12 @@ function ModalEstoqueDetalhe({estoque,onClose,onChanged,profile,filiais}){
         <InfoBox label="Disponível" value={estoque.quantidade_disponivel}/>
         <InfoBox label="Localização" value={estoque.localizacao||"—"}/>
       </div>
+      {profile.userType==="admin_geral"&&(
+        <button onClick={alternarObrigatoria} disabled={salvandoObrigatoria} style={{display:"flex",alignItems:"center",gap:6,border:"none",
+          background:"none",color:BLUE,fontSize:12,fontWeight:700,cursor:salvandoObrigatoria?"default":"pointer",padding:0,marginBottom:14,opacity:salvandoObrigatoria?.5:1}}>
+          <ShieldCheck size={12}/>{estoque.catalogo?.obrigatoria?"Desmarcar como obrigatória":"Marcar como obrigatória"}
+        </button>
+      )}
       {isAdmin&&(ajustando?(
         <div style={{display:"flex",gap:8,alignItems:"flex-end",marginBottom:14}}>
           <Field label="Nova quantidade total">
@@ -1441,11 +1490,12 @@ function ModalGrupoUnidades({grupo,categorias,onClose,onSelectUnidade}){
   return(
     <Modal title={grupo.nome} onClose={onClose} width={560}>
       <div style={{marginBottom:16,display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
-        <div style={{fontSize:12,color:"#6B7280"}}>
+        <div style={{fontSize:12,color:"#6B7280",display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
           {categoriaObj?.nome||"—"} · {grupo.itens.length} unidade(s) cadastrada(s)
+          {grupo.obrigatoria&&<BadgeObrigatoria/>}
         </div>
         <span style={{fontSize:12,fontWeight:800,color:disponiveis>0?"#059669":"#B91C1C"}}>
-          {disponiveis} disponível(is)
+          {disponiveis}/{grupo.itens.length} disponíveis
         </span>
       </div>
       <div style={{display:"flex",flexDirection:"column",gap:8,maxHeight:460,overflowY:"auto"}}>
@@ -1553,6 +1603,7 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
   const[filtroStatus,setFiltroStatus]=useState("");
   const[filtroFilial,setFiltroFilial]=useState("");
   const[filtroCategoria,setFiltroCategoria]=useState("");
+  const[filtroObrigatoria,setFiltroObrigatoria]=useState("");
   const[selecionada,setSelecionada]=useState(null);
   const[grupoSelecionado,setGrupoSelecionado]=useState(null);
   const[estoqueSelecionado,setEstoqueSelecionado]=useState(null);
@@ -1563,8 +1614,8 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
 
   async function load(){
     setLoading(true);
-    let qU=supabase.from("ferramentas_unidade").select("*, colaborador_atual:colaborador_atual_id(name), catalogo:catalogo_id(nome,categoria_id)").order("codigo");
-    let qE=supabase.from("estoque_pool").select("*, catalogo:catalogo_id(nome,categoria_id)");
+    let qU=supabase.from("ferramentas_unidade").select("*, colaborador_atual:colaborador_atual_id(name), catalogo:catalogo_id(nome,categoria_id,obrigatoria)").order("codigo");
+    let qE=supabase.from("estoque_pool").select("*, catalogo:catalogo_id(nome,categoria_id,obrigatoria)");
     if(filtroFilial){qU=qU.eq("filial_id",filtroFilial);qE=qE.eq("filial_id",filtroFilial);}
     else if(profile.userType!=="admin_geral"){qU=qU.in("filial_id",profile.filialIds);qE=qE.in("filial_id",profile.filialIds);}
     if(filtroStatus)qU=qU.eq("status",filtroStatus);
@@ -1586,15 +1637,23 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
 
   const unidadesFiltradas=useMemo(()=>{
     const t=busca.trim().toLowerCase();
-    if(!t)return unidades;
-    return unidades.filter(f=>f.codigo.toLowerCase().includes(t)||(f.catalogo?.nome||"").toLowerCase().includes(t));
-  },[unidades,busca]);
+    return unidades.filter(f=>{
+      if(t&&!(f.codigo.toLowerCase().includes(t)||(f.catalogo?.nome||"").toLowerCase().includes(t)))return false;
+      if(filtroObrigatoria==="sim"&&!f.catalogo?.obrigatoria)return false;
+      if(filtroObrigatoria==="nao"&&f.catalogo?.obrigatoria)return false;
+      return true;
+    });
+  },[unidades,busca,filtroObrigatoria]);
   const estoquesFiltrados=useMemo(()=>{
     if(filtroStatus)return [];
     const t=busca.trim().toLowerCase();
-    if(!t)return estoques;
-    return estoques.filter(e=>(e.catalogo?.nome||"").toLowerCase().includes(t));
-  },[estoques,busca,filtroStatus]);
+    return estoques.filter(e=>{
+      if(t&&!(e.catalogo?.nome||"").toLowerCase().includes(t))return false;
+      if(filtroObrigatoria==="sim"&&!e.catalogo?.obrigatoria)return false;
+      if(filtroObrigatoria==="nao"&&e.catalogo?.obrigatoria)return false;
+      return true;
+    });
+  },[estoques,busca,filtroStatus,filtroObrigatoria]);
 
   // Visão de dois níveis: agrupa as unidades individuais por catálogo — a lista mostra
   // um item por tipo de ferramenta (quantas temos daquela), e o clique abre o detalhe
@@ -1604,7 +1663,7 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
     unidadesFiltradas.forEach(u=>{
       const key=u.catalogo_id;
       if(!porCatalogo.has(key)){
-        porCatalogo.set(key,{catalogoId:key,nome:u.catalogo?.nome||"—",categoriaId:u.catalogo?.categoria_id,itens:[]});
+        porCatalogo.set(key,{catalogoId:key,nome:u.catalogo?.nome||"—",categoriaId:u.catalogo?.categoria_id,obrigatoria:!!u.catalogo?.obrigatoria,itens:[]});
       }
       porCatalogo.get(key).itens.push(u);
     });
@@ -1708,6 +1767,13 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
             {categorias.map(c=><option key={c.id} value={c.id}>{c.nome}</option>)}
           </select>
         </Field>
+        <Field label="Obrigatória">
+          <select value={filtroObrigatoria} onChange={e=>setFiltroObrigatoria(e.target.value)} style={{...inputStyle,width:"auto"}}>
+            <option value="">Todas</option>
+            <option value="sim">Só obrigatórias</option>
+            <option value="nao">Só não obrigatórias</option>
+          </select>
+        </Field>
       </div>
 
       {loading?<div style={{padding:60,textAlign:"center"}}><Spinner size={20}/></div>:
@@ -1720,10 +1786,12 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
                 <div>
                   <div style={{fontSize:11,color:"#9CA3AF",fontWeight:700}}>ESTOQUE</div>
-                  <div style={{fontSize:14,fontWeight:700,color:"#111827"}}>{e.catalogo?.nome}</div>
+                  <div style={{fontSize:14,fontWeight:700,color:"#111827",display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                    {e.catalogo?.nome}{e.catalogo?.obrigatoria&&<BadgeObrigatoria/>}
+                  </div>
                 </div>
-                <span style={{fontSize:12,fontWeight:800,color:e.quantidade_disponivel>0?"#059669":"#B91C1C"}}>
-                  {e.quantidade_disponivel}/{e.quantidade_total}
+                <span style={{fontSize:12,fontWeight:800,color:e.quantidade_disponivel>0?"#059669":"#B91C1C",flexShrink:0}}>
+                  {e.quantidade_disponivel}/{e.quantidade_total} disponíveis
                 </span>
               </div>
             </button>
@@ -1737,12 +1805,19 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
                   <div>
                     <div style={{fontSize:11,color:"#9CA3AF",fontWeight:700}}>{unico?unico.codigo:`${g.itens.length} UNIDADES`}</div>
-                    <div style={{fontSize:14,fontWeight:700,color:"#111827"}}>{g.nome}</div>
+                    <div style={{fontSize:14,fontWeight:700,color:"#111827",display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                      {g.nome}{g.obrigatoria&&<BadgeObrigatoria/>}
+                    </div>
                   </div>
-                  {unico?<StatusBadge status={unico.status}/>:
-                    <span style={{fontSize:12,fontWeight:800,color:disponiveis>0?"#059669":"#B91C1C"}}>{disponiveis} disp.</span>}
+                  <span style={{fontSize:12,fontWeight:800,color:disponiveis>0?"#059669":"#B91C1C",flexShrink:0}}>
+                    {disponiveis}/{g.itens.length} disponíveis
+                  </span>
                 </div>
-                {unico?.colaborador_atual?.name&&<div style={{fontSize:12,color:"#6B7280",marginTop:6}}>Com: {unico.colaborador_atual.name}</div>}
+                {unico&&unico.status!=="disponivel"&&(
+                  <div style={{fontSize:12,color:"#6B7280",marginTop:6}}>
+                    {STATUS_FERRAMENTA_INFO[unico.status]?.label}{unico.colaborador_atual?.name?` — ${unico.colaborador_atual.name}`:""}
+                  </div>
+                )}
               </button>
             );
           })}
@@ -1752,7 +1827,7 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
           <table style={{width:"100%",borderCollapse:"collapse"}}>
             <thead>
               <tr style={{background:"#F9FAFB"}}>
-                {["Código","Nome","Categoria","Status","Com quem está","Próx. Aferição",""].map(h=>(
+                {["Código","Nome","Categoria","Disponibilidade","Com quem está","Próx. Aferição",""].map(h=>(
                   <th key={h} style={{padding:"10px 16px",textAlign:"left",fontSize:11,fontWeight:700,color:"#6B7280",textTransform:"uppercase"}}>{h}</th>
                 ))}
               </tr>
@@ -1762,11 +1837,15 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
                 <tr key={"pool-"+e.id} className="row-hover" onClick={()=>setEstoqueSelecionado(e)}
                   style={{borderTop:"1px solid #F1F5F9",cursor:"pointer"}}>
                   <td style={{padding:"12px 16px",fontSize:13,fontWeight:700,color:"#9CA3AF"}}>—</td>
-                  <td style={{padding:"12px 16px",fontSize:13,color:"#374151"}}>{e.catalogo?.nome}</td>
+                  <td style={{padding:"12px 16px",fontSize:13,color:"#374151"}}>
+                    <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                      {e.catalogo?.nome}{e.catalogo?.obrigatoria&&<BadgeObrigatoria/>}
+                    </div>
+                  </td>
                   <td style={{padding:"12px 16px",fontSize:13,color:"#6B7280"}}>{categorias.find(c=>c.id===e.catalogo?.categoria_id)?.nome||"—"}</td>
                   <td style={{padding:"12px 16px"}}>
                     <span style={{fontSize:12,fontWeight:800,color:e.quantidade_disponivel>0?"#059669":"#B91C1C"}}>
-                      {e.quantidade_disponivel}/{e.quantidade_total} disponível
+                      {e.quantidade_disponivel}/{e.quantidade_total} disponíveis
                     </span>
                   </td>
                   <td style={{padding:"12px 16px",fontSize:13,color:"#374151"}}>{e.quantidade_emprestada>0?`${e.quantidade_emprestada} emprestada(s)`:"—"}</td>
@@ -1783,13 +1862,18 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
                     <td style={{padding:"12px 16px",fontSize:13,fontWeight:700,color:"#111827"}}>
                       {unico?unico.codigo:`${g.itens.length} unidades`}
                     </td>
-                    <td style={{padding:"12px 16px",fontSize:13,color:"#374151"}}>{g.nome}</td>
+                    <td style={{padding:"12px 16px",fontSize:13,color:"#374151"}}>
+                      <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                        {g.nome}{g.obrigatoria&&<BadgeObrigatoria/>}
+                      </div>
+                    </td>
                     <td style={{padding:"12px 16px",fontSize:13,color:"#6B7280"}}>{categorias.find(c=>c.id===g.categoriaId)?.nome||"—"}</td>
                     <td style={{padding:"12px 16px"}}>
-                      {unico?<StatusBadge status={unico.status}/>:
-                        <span style={{fontSize:12,fontWeight:800,color:disponiveis>0?"#059669":"#B91C1C"}}>{disponiveis}/{g.itens.length} disponível</span>}
+                      <span style={{fontSize:12,fontWeight:800,color:disponiveis>0?"#059669":"#B91C1C"}}>{disponiveis}/{g.itens.length} disponíveis</span>
                     </td>
-                    <td style={{padding:"12px 16px",fontSize:13,color:"#374151"}}>{unico?(unico.colaborador_atual?.name||"—"):"—"}</td>
+                    <td style={{padding:"12px 16px",fontSize:13,color:"#374151"}}>
+                      {unico&&unico.status!=="disponivel"?`${STATUS_FERRAMENTA_INFO[unico.status]?.label||unico.status}${unico.colaborador_atual?.name?" — "+unico.colaborador_atual.name:""}`:"—"}
+                    </td>
                     <td style={{padding:"12px 16px",fontSize:13,color:"#374151"}}>{unico?fmtDate(unico.data_proxima_afericao):"—"}</td>
                     <td style={{padding:"12px 16px"}}><ChevronRight size={15} color="#9CA3AF"/></td>
                   </tr>
@@ -1804,7 +1888,7 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
         pessoasFilial={pessoasFilial}
         onClose={()=>setSelecionada(null)}
         onChanged={()=>{load();
-          supabase.from("ferramentas_unidade").select("*, colaborador_atual:colaborador_atual_id(name), catalogo:catalogo_id(nome,categoria_id)").eq("id",selecionada.id).single()
+          supabase.from("ferramentas_unidade").select("*, colaborador_atual:colaborador_atual_id(name), catalogo:catalogo_id(nome,categoria_id,obrigatoria)").eq("id",selecionada.id).single()
             .then(({data})=>{if(data)setSelecionada(data);});
         }}/>}
       {estoqueSelecionado&&<ModalEstoqueDetalhe estoque={estoqueSelecionado} profile={profile} filiais={filiais}
