@@ -149,6 +149,15 @@ function getInitials(name){
   const parts=String(name).trim().split(/\s+/).slice(0,2);
   return parts.map(p=>p[0]?.toUpperCase()||"").join("")||"US";
 }
+// Alguns catálogos ganharam um sufixo " (código)" no nome pra virarem únicos no banco
+// (import real de Montes Claros — ver memória do projeto). Quando o código já aparece
+// junto na tela (ex.: "381000186" + nome), esse sufixo é só ruído redundante — removido
+// aqui só na exibição, o dado salvo continua intacto.
+function nomeLimpo(nome,codigo){
+  if(!nome||!codigo)return nome;
+  const suf=` (${String(codigo).trim()})`;
+  return nome.endsWith(suf)?nome.slice(0,-suf.length):nome;
+}
 function diasEntre(d1,d2=new Date()){
   const a=new Date(d1),b=new Date(d2);
   return Math.floor((b-a)/86400000);
@@ -825,7 +834,7 @@ function UsoAoVivoPanel(){
   },[]);
 
   const itens=useMemo(()=>[
-    ...unidades.map(u=>({key:"u-"+u.id,colaborador:u.colaborador?.name,ferramenta:u.catalogo?.nome,detalhe:u.codigo,desde:u.data_retirada_atual})),
+    ...unidades.map(u=>({key:"u-"+u.id,colaborador:u.colaborador?.name,ferramenta:nomeLimpo(u.catalogo?.nome,u.codigo),detalhe:u.codigo,desde:u.data_retirada_atual})),
     ...emprestimos.map(e=>({key:"e-"+e.id,colaborador:e.colaborador?.name,ferramenta:e.estoque?.catalogo?.nome,detalhe:`${e.quantidade}x`,desde:e.data_retirada})),
   ].sort((a,b)=>new Date(a.desde)-new Date(b.desde)),[unidades,emprestimos]);
 
@@ -1123,7 +1132,7 @@ function ModalAcao({ferramenta,tipo,onClose,onDone,pessoasFilial}){
       <ErrorBox>{error}</ErrorBox>
       <div style={{marginBottom:16,padding:12,borderRadius:10,background:"#F9FAFB",border:"1px solid #F1F5F9"}}>
         <div style={{fontSize:11,color:"#9CA3AF",fontWeight:700,textTransform:"uppercase",marginBottom:2}}>{ferramenta.codigo}</div>
-        <div style={{fontSize:14,fontWeight:700,color:"#111827"}}>{ferramenta.catalogo?.nome}</div>
+        <div style={{fontSize:14,fontWeight:700,color:"#111827"}}>{nomeLimpo(ferramenta.catalogo?.nome,ferramenta.codigo)}</div>
       </div>
       <div style={{display:"flex",flexDirection:"column",gap:14}}>
         {CONFIG.needsPessoa&&(
@@ -1201,7 +1210,7 @@ function FerramentaDetalheModal({ferramenta,onClose,onChanged,profile,filiais,ca
         <div>
           <div style={{fontSize:11,color:"#9CA3AF",fontWeight:700,textTransform:"uppercase",marginBottom:2}}>{ferramenta.codigo}</div>
           <div style={{fontSize:18,fontWeight:800,color:"#111827",display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-            {ferramenta.catalogo?.nome}{ferramenta.catalogo?.obrigatoria&&<BadgeObrigatoria/>}
+            {nomeLimpo(ferramenta.catalogo?.nome,ferramenta.codigo)}{ferramenta.catalogo?.obrigatoria&&<BadgeObrigatoria/>}
           </div>
           <div style={{fontSize:12,color:"#6B7280",marginTop:4,display:"flex",alignItems:"center",gap:5}}>
             <MapPin size={12}/>{filialNome}{categoriaObj?` · ${categoriaObj.nome}`:""}
@@ -1323,7 +1332,7 @@ function ModalTransferencia({ferramenta,filiais,profile,onClose,onDone}){
       <ErrorBox>{error}</ErrorBox>
       <div style={{marginBottom:16,padding:12,borderRadius:10,background:"#F9FAFB",border:"1px solid #F1F5F9"}}>
         <div style={{fontSize:11,color:"#9CA3AF",fontWeight:700,textTransform:"uppercase",marginBottom:2}}>{ferramenta.codigo}</div>
-        <div style={{fontSize:14,fontWeight:700,color:"#111827"}}>{ferramenta.catalogo?.nome}</div>
+        <div style={{fontSize:14,fontWeight:700,color:"#111827"}}>{nomeLimpo(ferramenta.catalogo?.nome,ferramenta.codigo)}</div>
       </div>
       <div style={{display:"flex",flexDirection:"column",gap:14}}>
         <Field label="Filial de destino" required>
@@ -1684,7 +1693,7 @@ function TransferenciasPendentesPanel({profile,onChanged}){
                 display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
                 <div>
                   <div style={{fontSize:13,fontWeight:700,color:"#111827"}}>
-                    {t.tipo==="estoque"?`${t.quantidade}× ${t.catalogo?.nome}`:`${t.ferramenta?.codigo} — ${t.ferramenta?.catalogo?.nome}`}
+                    {t.tipo==="estoque"?`${t.quantidade}× ${t.catalogo?.nome}`:`${t.ferramenta?.codigo} — ${nomeLimpo(t.ferramenta?.catalogo?.nome,t.ferramenta?.codigo)}`}
                   </div>
                   <div style={{fontSize:11.5,color:"#6B7280"}}>
                     {t.origem?.nome} → {t.destino?.nome} · solicitado por {t.solicitante?.name} em {fmtDateTime(t.created_at)}
@@ -1931,7 +1940,7 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
                   <div>
                     <div style={{fontSize:11,color:"#9CA3AF",fontWeight:700}}>{unico?unico.codigo:`${g.itens.length} UNIDADES`}</div>
                     <div style={{fontSize:14,fontWeight:700,color:"#111827",display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
-                      {g.nome}{g.obrigatoria&&<BadgeObrigatoria/>}
+                      {unico?nomeLimpo(g.nome,unico.codigo):g.nome}{g.obrigatoria&&<BadgeObrigatoria/>}
                     </div>
                   </div>
                   <span style={{fontSize:12,fontWeight:800,color:disponiveis>0?"#059669":"#B91C1C",flexShrink:0}}>
@@ -1984,7 +1993,7 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
                     <td style={{padding:"12px 16px",fontSize:13,fontWeight:700,color:"#111827"}}>
                       {unico?unico.codigo:`${g.itens.length} unidades`}
                     </td>
-                    <td style={{padding:"12px 16px",fontSize:13,color:"#374151"}}>{g.nome}</td>
+                    <td style={{padding:"12px 16px",fontSize:13,color:"#374151"}}>{unico?nomeLimpo(g.nome,unico.codigo):g.nome}</td>
                     <td style={{padding:"12px 16px",fontSize:13,color:"#6B7280"}}>{categorias.find(c=>c.id===g.categoriaId)?.nome||"—"}</td>
                     <td style={{padding:"12px 16px"}}>{g.obrigatoria?<BadgeObrigatoria/>:<BadgeNaoObrigatoria/>}</td>
                     <td style={{padding:"12px 16px"}}>
@@ -2096,7 +2105,7 @@ function CampoBuscaCracha({filiais,onEncontrado}){
 function ModalNovaRetirada({filiais,onClose,onFeito}){
   const[colaborador,setColaborador]=useState(null);
   return(
-    <Modal title="Nova Retirada" onClose={onClose}>
+    <Modal title="Nova Retirada" onClose={onClose} width={640}>
       {!colaborador
         ?<CampoBuscaCracha filiais={filiais} onEncontrado={setColaborador}/>
         :<RetiradaColaborador colaborador={colaborador} onVoltar={()=>setColaborador(null)} onFeito={onFeito}/>}
@@ -2107,7 +2116,7 @@ function ModalNovaRetirada({filiais,onClose,onFeito}){
 function ModalDevolucao({filiais,onClose,onFeito}){
   const[colaborador,setColaborador]=useState(null);
   return(
-    <Modal title="Devolver Ferramenta" onClose={onClose}>
+    <Modal title="Devolver Ferramenta" onClose={onClose} width={640}>
       {!colaborador
         ?<CampoBuscaCracha filiais={filiais} onEncontrado={setColaborador}/>
         :<DevolucaoColaborador colaborador={colaborador} onVoltar={()=>setColaborador(null)} onFeito={onFeito}/>}
@@ -2116,6 +2125,7 @@ function ModalDevolucao({filiais,onClose,onFeito}){
 }
 
 function RetiradaColaborador({colaborador,onVoltar,onFeito}){
+  const isMobile=useIsMobile();
   const[busca,setBusca]=useState("");
   const[unidades,setUnidades]=useState([]);
   const[estoques,setEstoques]=useState([]);
@@ -2145,7 +2155,7 @@ function RetiradaColaborador({colaborador,onVoltar,onFeito}){
     const{error:err}=await supabase.from("movimentacoes").insert({ferramenta_id:u.id,tipo:"retirada",pessoa_responsavel_id:colaborador.id});
     setProcessando(null);
     if(err){setError(err.message||"Não foi possível registrar.");return;}
-    setFeitos(prev=>[...prev,`${u.codigo} — ${u.catalogo?.nome}`]);
+    setFeitos(prev=>[...prev,`${u.codigo} — ${nomeLimpo(u.catalogo?.nome,u.codigo)}`]);
     load();
     onFeito?.();
   }
@@ -2188,26 +2198,28 @@ function RetiradaColaborador({colaborador,onVoltar,onFeito}){
       (unidadesF.length===0&&estoquesF.length===0)?<EmptyState icon={Wrench} title="Nenhuma ferramenta disponível nessa filial"/>:(
         <div style={{display:"flex",flexDirection:"column",gap:8}}>
           {unidadesF.map(u=>(
-            <div key={u.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",
-              background:"#fff",border:"1px solid #F1F5F9",borderRadius:10,flexWrap:"wrap",gap:8}}>
-              <div>
-                <span style={{fontSize:11,color:"#9CA3AF",fontWeight:700}}>{u.codigo}</span>{" "}
-                <span style={{fontSize:13.5,fontWeight:700,color:"#111827"}}>{u.catalogo?.nome}</span>
+            <div key={u.id} style={{display:"flex",flexDirection:isMobile?"column":"row",
+              justifyContent:"space-between",alignItems:isMobile?"stretch":"center",gap:isMobile?10:14,
+              padding:"11px 14px",background:"#fff",border:"1px solid #F1F5F9",borderRadius:10}}>
+              <div style={{minWidth:0}}>
+                <div style={{fontSize:10.5,color:"#9CA3AF",fontWeight:700,textTransform:"uppercase",letterSpacing:".3px"}}>{u.codigo}</div>
+                <div style={{fontSize:14,fontWeight:700,color:"#111827",marginTop:1}}>{nomeLimpo(u.catalogo?.nome,u.codigo)}</div>
               </div>
               <BtnPrimary onClick={()=>retirarUnidade(u)} loading={processando===u.id}>Retirar</BtnPrimary>
             </div>
           ))}
           {estoquesF.map(e=>(
-            <div key={e.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",
-              background:"#fff",border:"1px solid #F1F5F9",borderRadius:10,flexWrap:"wrap",gap:8}}>
-              <div>
-                <span style={{fontSize:13.5,fontWeight:700,color:"#111827"}}>{e.catalogo?.nome}</span>{" "}
-                <span style={{fontSize:11,color:"#9CA3AF"}}>({e.quantidade_disponivel} disponível)</span>
+            <div key={e.id} style={{display:"flex",flexDirection:isMobile?"column":"row",
+              justifyContent:"space-between",alignItems:isMobile?"stretch":"center",gap:isMobile?10:14,
+              padding:"11px 14px",background:"#fff",border:"1px solid #F1F5F9",borderRadius:10}}>
+              <div style={{minWidth:0}}>
+                <div style={{fontSize:14,fontWeight:700,color:"#111827"}}>{e.catalogo?.nome}</div>
+                <div style={{fontSize:11,color:"#9CA3AF",marginTop:1}}>{e.quantidade_disponivel} disponível(is)</div>
               </div>
               <div style={{display:"flex",gap:6,alignItems:"center"}}>
                 <input type="number" min="1" max={e.quantidade_disponivel} value={qtdPool[e.id]??1}
                   onChange={ev=>setQtdPool(prev=>({...prev,[e.id]:ev.target.value}))}
-                  style={{...inputStyle,width:60,padding:"8px"}}/>
+                  style={{...inputStyle,width:64,padding:"8px",flexShrink:0}}/>
                 <BtnPrimary onClick={()=>retirarPool(e)} loading={processando===e.id}>Retirar</BtnPrimary>
               </div>
             </div>
@@ -2257,7 +2269,7 @@ function DevolucaoColaborador({colaborador,onVoltar,onFeito}){
       if(!selecionados.has("u-"+u.id))continue;
       const{error:err}=await supabase.from("movimentacoes").insert({ferramenta_id:u.id,tipo:"devolucao"});
       if(err){setError(`Não foi possível devolver ${u.codigo}: ${err.message||""}`);setSalvando(false);load();onFeito?.();return;}
-      novosFeitos.push(`${u.codigo} — ${u.catalogo?.nome}`);
+      novosFeitos.push(`${u.codigo} — ${nomeLimpo(u.catalogo?.nome,u.codigo)}`);
     }
     for(const e of emprestimos){
       if(!selecionados.has("e-"+e.id))continue;
@@ -2298,13 +2310,13 @@ function DevolucaoColaborador({colaborador,onVoltar,onFeito}){
           {unidades.map(u=>{
             const key="u-"+u.id, checked=selecionados.has(key);
             return(
-              <label key={key} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",cursor:"pointer",
+              <label key={key} style={{display:"flex",alignItems:"center",gap:10,padding:"11px 14px",cursor:"pointer",
                 background:checked?"#EEF2FF":"#fff",border:`1.5px solid ${checked?BLUE:"#F1F5F9"}`,borderRadius:10}}>
                 <input type="checkbox" checked={checked} onChange={()=>toggle(key)} style={{width:16,height:16,flexShrink:0}}/>
                 <div style={{flex:1,minWidth:0}}>
-                  <span style={{fontSize:11,color:"#9CA3AF",fontWeight:700}}>{u.codigo}</span>{" "}
-                  <span style={{fontSize:13.5,fontWeight:700,color:"#111827"}}>{u.catalogo?.nome}</span>
-                  <div style={{fontSize:11,color:"#9CA3AF"}}>Desde {fmtDateTime(u.data_retirada_atual)}</div>
+                  <div style={{fontSize:10.5,color:"#9CA3AF",fontWeight:700,textTransform:"uppercase",letterSpacing:".3px"}}>{u.codigo}</div>
+                  <div style={{fontSize:14,fontWeight:700,color:"#111827",marginTop:1}}>{nomeLimpo(u.catalogo?.nome,u.codigo)}</div>
+                  <div style={{fontSize:11,color:"#9CA3AF",marginTop:2}}>Desde {fmtDateTime(u.data_retirada_atual)}</div>
                 </div>
               </label>
             );
@@ -2312,12 +2324,12 @@ function DevolucaoColaborador({colaborador,onVoltar,onFeito}){
           {emprestimos.map(e=>{
             const key="e-"+e.id, checked=selecionados.has(key);
             return(
-              <label key={key} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",cursor:"pointer",
+              <label key={key} style={{display:"flex",alignItems:"center",gap:10,padding:"11px 14px",cursor:"pointer",
                 background:checked?"#EEF2FF":"#fff",border:`1.5px solid ${checked?BLUE:"#F1F5F9"}`,borderRadius:10}}>
                 <input type="checkbox" checked={checked} onChange={()=>toggle(key)} style={{width:16,height:16,flexShrink:0}}/>
                 <div style={{flex:1,minWidth:0}}>
-                  <span style={{fontSize:13.5,fontWeight:700,color:"#111827"}}>{e.quantidade}x {e.estoque?.catalogo?.nome}</span>
-                  <div style={{fontSize:11,color:"#9CA3AF"}}>Desde {fmtDateTime(e.data_retirada)}</div>
+                  <div style={{fontSize:14,fontWeight:700,color:"#111827"}}>{e.quantidade}x {e.estoque?.catalogo?.nome}</div>
+                  <div style={{fontSize:11,color:"#9CA3AF",marginTop:2}}>Desde {fmtDateTime(e.data_retirada)}</div>
                 </div>
               </label>
             );
@@ -2395,7 +2407,7 @@ function MovimentacoesView({profile,filiais}){
               <div style={{minWidth:0,flex:1}}>
                 <div style={{display:"flex",flexWrap:"wrap",gap:8,alignItems:"center"}}>
                   <span style={{fontSize:13,fontWeight:700,color:"#111827"}}>{TIPO_MOV_LABEL[m.tipo]||m.tipo}</span>
-                  <span style={{fontSize:12,color:"#6B7280"}}>{m.ferramenta?.codigo} — {m.ferramenta?.catalogo?.nome}</span>
+                  <span style={{fontSize:12,color:"#6B7280"}}>{m.ferramenta?.codigo} — {nomeLimpo(m.ferramenta?.catalogo?.nome,m.ferramenta?.codigo)}</span>
                 </div>
                 <div style={{fontSize:11.5,color:"#9CA3AF",marginTop:2}}>
                   {fmtDateTime(m.data)} · por {m.registrado_por_profile?.name||"—"}
@@ -2439,7 +2451,7 @@ function ModalEnviarConserto({ferramenta,onClose,onDone}){
       <ErrorBox>{error}</ErrorBox>
       <div style={{marginBottom:14,padding:12,borderRadius:10,background:"#F9FAFB",border:"1px solid #F1F5F9"}}>
         <div style={{fontSize:11,color:"#9CA3AF",fontWeight:700}}>{ferramenta.codigo}</div>
-        <div style={{fontSize:14,fontWeight:700,color:"#111827"}}>{ferramenta.catalogo?.nome}</div>
+        <div style={{fontSize:14,fontWeight:700,color:"#111827"}}>{nomeLimpo(ferramenta.catalogo?.nome,ferramenta.codigo)}</div>
       </div>
       <div style={{display:"flex",flexDirection:"column",gap:14}}>
         <Field label="Motivo do reparo" required>
@@ -2497,7 +2509,7 @@ function ModalRetornoConserto({manutencao,onClose,onDone,isAdmin}){
       <ErrorBox>{error}</ErrorBox>
       <div style={{marginBottom:14,padding:12,borderRadius:10,background:"#F9FAFB",border:"1px solid #F1F5F9"}}>
         <div style={{fontSize:11,color:"#9CA3AF",fontWeight:700}}>{manutencao.ferramenta?.codigo}</div>
-        <div style={{fontSize:14,fontWeight:700,color:"#111827"}}>{manutencao.ferramenta?.catalogo?.nome}</div>
+        <div style={{fontSize:14,fontWeight:700,color:"#111827"}}>{nomeLimpo(manutencao.ferramenta?.catalogo?.nome,manutencao.ferramenta?.codigo)}</div>
       </div>
       <div style={{display:"flex",flexDirection:"column",gap:14}}>
         <Field label="Resultado do reparo" required>
@@ -3173,7 +3185,7 @@ function RelatorioLinha({f}){
       display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,flexWrap:"wrap"}}>
       <div>
         <span style={{fontSize:11,color:"#9CA3AF",fontWeight:700}}>{f.codigo}</span>{" "}
-        <span style={{fontSize:13.5,fontWeight:700,color:"#111827"}}>{f.catalogo?.nome}</span>
+        <span style={{fontSize:13.5,fontWeight:700,color:"#111827"}}>{nomeLimpo(f.catalogo?.nome,f.codigo)}</span>
         <span style={{fontSize:12,color:"#6B7280"}}> · {f.filial?.nome}</span>
       </div>
       <div style={{fontSize:12.5,fontWeight:700,color:"#374151"}}>{fmtDate(f.data_proxima_afericao)}</div>
