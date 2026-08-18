@@ -1174,7 +1174,7 @@ function FerramentaDetalheModal({ferramenta,onClose,onChanged,profile,filiais,ca
       {tipo:"retirada",label:"Registrar Retirada",Icon:PackagePlus},
       ...(requerAfericao?[{tipo:"envio_afericao",label:"Enviar p/ Aferição",Icon:Clock}]:[]),
       {tipo:"envio_conserto",label:"Enviar para Reparo",Icon:PackageX},
-      ...(profile.filiaisAcesso.length>1?[{tipo:"transferencia",label:"Transferir para Outra Filial",Icon:ArrowLeftRight}]:[]),
+      {tipo:"transferencia",label:"Transferir para Outra Filial",Icon:ArrowLeftRight},
       {tipo:"extravio",label:"Reportar Extravio",Icon:AlertTriangle,danger:true},
       ...(isAdmin?[{tipo:"baixa",label:"Dar Baixa",Icon:Ban,danger:true,adminOnly:true}]:[]),
     ],
@@ -1298,7 +1298,7 @@ function FerramentaDetalheModal({ferramenta,onClose,onChanged,profile,filiais,ca
 }
 
 function ModalTransferencia({ferramenta,filiais,profile,onClose,onDone}){
-  const opcoesDestino=filiais.filter(f=>profile.filialIds.includes(f.id)&&f.id!==ferramenta.filial_id);
+  const opcoesDestino=filiais.filter(f=>f.id!==ferramenta.filial_id);
   const[filialDestinoId,setFilialDestinoId]=useState(opcoesDestino.length===1?opcoesDestino[0].id:"");
   const[motivo,setMotivo]=useState("");
   const[loading,setLoading]=useState(false);
@@ -1342,7 +1342,7 @@ function ModalTransferencia({ferramenta,filiais,profile,onClose,onDone}){
   );
 }
 function ModalTransferenciaEstoque({estoque,filiais,profile,onClose,onDone}){
-  const opcoesDestino=filiais.filter(f=>profile.filialIds.includes(f.id)&&f.id!==estoque.filial_id);
+  const opcoesDestino=filiais.filter(f=>f.id!==estoque.filial_id);
   const[filialDestinoId,setFilialDestinoId]=useState(opcoesDestino.length===1?opcoesDestino[0].id:"");
   const[quantidade,setQuantidade]=useState("");
   const[motivo,setMotivo]=useState("");
@@ -1539,7 +1539,7 @@ function ModalEstoqueDetalhe({estoque,onClose,onChanged,profile,filiais}){
         </EditableInfoBox>
       </div>
 
-      {profile.filiaisAcesso.length>1&&estoque.quantidade_disponivel>0&&(
+      {estoque.quantidade_disponivel>0&&(
         <div style={{marginBottom:20}}>
           <div style={{fontSize:11,fontWeight:700,color:"#9CA3AF",textTransform:"uppercase",marginBottom:8,letterSpacing:".4px"}}>Ações</div>
           <ChipButton Icon={ArrowLeftRight} onClick={()=>setTransferindo(true)}>Transferir para Outra Filial</ChipButton>
@@ -1676,7 +1676,7 @@ function TransferenciasPendentesPanel({profile,onChanged}){
       {loading?<div style={{padding:16,textAlign:"center"}}><Spinner size={16}/></div>:(
         <div style={{display:"flex",flexDirection:"column",gap:8}}>
           {lista.map(t=>{
-            const podeDecidir=profile.userType==="admin_geral"||(profile.userType==="admin_area"&&profile.filialId===t.filial_destino_id);
+            const podeDecidir=profile.userType==="admin_geral"||profile.gerentePosVendas;
             const podeCancelar=!podeDecidir&&t.solicitante_id===profile.id;
             return(
               <div key={t.id} style={{padding:"10px 14px",background:"#FAFAFA",border:"1px solid #F1F5F9",borderRadius:10,
@@ -1853,7 +1853,7 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
         </div>
       </div>
 
-      {profile.userType!=="colaborador"&&<TransferenciasPendentesPanel profile={profile} onChanged={load}/>}
+      <TransferenciasPendentesPanel profile={profile} onChanged={load}/>
 
       <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:18,alignItems:"flex-end"}}>
         <Field label="Buscar">
@@ -1890,9 +1890,14 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
             <option value="nao">Só não obrigatórias</option>
           </select>
         </Field>
-        <div style={{marginLeft:isMobile?0:"auto"}}>
+        {isMobile?(
           <BtnSecondary onClick={()=>setExportarAberto(true)}><Download size={14}/>Exportar</BtnSecondary>
-        </div>
+        ):(
+          <div style={{display:"flex",gap:8,marginLeft:"auto"}}>
+            <BtnSecondary onClick={()=>exportarEstoque("excel")}><FileSpreadsheet size={14}/>Exportar Excel</BtnSecondary>
+            <BtnSecondary onClick={()=>exportarEstoque("pdf")}><FileText size={14}/>Exportar PDF</BtnSecondary>
+          </div>
+        )}
       </div>
 
       {loading?<div style={{padding:60,textAlign:"center"}}><Spinner size={20}/></div>:
@@ -2742,6 +2747,7 @@ function ModalUsuario({onClose,onSaved,filiais,profile,editando}){
   const[userType,setUserType]=useState(editando?.user_type||"colaborador");
   const[filialId,setFilialId]=useState(editando?.filial_id||(profile.userType==="admin_area"?profile.filialId:""));
   const[filiaisExtras,setFiliaisExtras]=useState(()=>new Set());
+  const[gerentePosVendas,setGerentePosVendas]=useState(editando?.gerente_pos_vendas||false);
   const[loading,setLoading]=useState(false);
   const[error,setError]=useState("");
   const[resultado,setResultado]=useState(null);
@@ -2785,7 +2791,9 @@ function ModalUsuario({onClose,onSaved,filiais,profile,editando}){
       const json=await resp.json();
       if(!json.ok){setLoading(false);setError(json.error);return;}
       // matrícula não faz parte da Edge Function — grava direto (RLS já permite admin editar perfis no escopo)
-      const{error:errMat}=await supabase.from("profiles").update({matricula:matricula.trim()||null}).eq("id",editando.id);
+      const dadosDiretos={matricula:matricula.trim()||null};
+      if(podeConcederAcesso)dadosDiretos.gerente_pos_vendas=gerentePosVendas;
+      const{error:errMat}=await supabase.from("profiles").update(dadosDiretos).eq("id",editando.id);
       if(errMat){setLoading(false);setError(traduzErro(errMat));return;}
       const{error:errAcesso}=await sincronizarAcessosExtras(editando.id);
       setLoading(false);
@@ -2798,9 +2806,12 @@ function ModalUsuario({onClose,onSaved,filiais,profile,editando}){
       });
       const json=await resp.json();
       if(!json.ok){setLoading(false);setError(json.error);return;}
-      if(matricula.trim()){
-        const{error:errMat}=await supabase.from("profiles").update({matricula:matricula.trim()}).eq("id",json.user.id);
-        if(errMat){setLoading(false);setError("Usuário criado, mas falhou ao salvar a matrícula: "+traduzErro(errMat));return;}
+      const dadosDiretos={};
+      if(matricula.trim())dadosDiretos.matricula=matricula.trim();
+      if(podeConcederAcesso&&gerentePosVendas)dadosDiretos.gerente_pos_vendas=true;
+      if(Object.keys(dadosDiretos).length>0){
+        const{error:errMat}=await supabase.from("profiles").update(dadosDiretos).eq("id",json.user.id);
+        if(errMat){setLoading(false);setError("Usuário criado, mas falhou ao salvar matrícula/permissões: "+traduzErro(errMat));return;}
       }
       const{error:errAcesso}=await sincronizarAcessosExtras(json.user.id);
       setLoading(false);
@@ -2834,7 +2845,7 @@ function ModalUsuario({onClose,onSaved,filiais,profile,editando}){
           </select>
         </Field>
         {userType!=="admin_geral"&&(
-          <Field label="Filial" required hint={userType==="admin_area"?"Filial da qual essa pessoa é gestora (aprova transferências para cá).":null}>
+          <Field label="Filial" required hint={userType==="admin_area"?"Filial da qual essa pessoa é gestora.":null}>
             <select value={filialId} onChange={e=>setFilialId(e.target.value)} style={inputStyle} disabled={profile.userType==="admin_area"}>
               <option value="">Selecione...</option>
               {filiais.map(f=><option key={f.id} value={f.id}>{f.nome}</option>)}
@@ -2853,6 +2864,12 @@ function ModalUsuario({onClose,onSaved,filiais,profile,editando}){
               {filiais.filter(f=>f.id!==filialId).length===0&&<span style={{fontSize:12,color:"#9CA3AF"}}>Nenhuma outra filial cadastrada.</span>}
             </div>
           </Field>
+        )}
+        {podeConcederAcesso&&(
+          <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:13,color:"#374151"}}>
+            <input type="checkbox" checked={gerentePosVendas} onChange={e=>setGerentePosVendas(e.target.checked)}/>
+            Gerente de Pós-Vendas (aprova todas as transferências entre filiais)
+          </label>
         )}
       </div>
     </Modal>
@@ -2930,7 +2947,13 @@ function GestaoUsuariosView({profile,filiais}){
                 {getInitials(u.name)}
               </div>
               <div style={{flex:1,minWidth:140}}>
-                <div style={{fontSize:13.5,fontWeight:700,color:"#111827"}}>{u.name}{!u.is_active&&<span style={{color:"#B91C1C",fontSize:11,fontWeight:700}}> (inativo)</span>}</div>
+                <div style={{fontSize:13.5,fontWeight:700,color:"#111827",display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                  {u.name}{!u.is_active&&<span style={{color:"#B91C1C",fontSize:11,fontWeight:700}}>(inativo)</span>}
+                  {u.gerente_pos_vendas&&(
+                    <span style={{fontSize:10,fontWeight:800,color:"#1955FF",background:"#EFF4FF",padding:"2px 7px",
+                      borderRadius:99,textTransform:"uppercase",letterSpacing:".3px"}}>Pós-Vendas</span>
+                  )}
+                </div>
                 <div style={{fontSize:12,color:"#6B7280"}}>{u.email}</div>
               </div>
               <div style={{fontSize:12,color:"#374151",minWidth:150}}>{USER_TYPE_LABEL[u.user_type]}</div>
@@ -3507,7 +3530,7 @@ function App(){
     setProfile({
       id:prof.id,name:prof.name,email:prof.email,userType:prof.user_type,
       filialId:prof.filial_id,filialNome:prof.filial?.nome,color:prof.color,
-      filialIds,filiaisAcesso,
+      filialIds,filiaisAcesso,gerentePosVendas:!!prof.gerente_pos_vendas,
     });
     setActiveNav(prof.user_type==="colaborador"?"ferramentas":"dashboard");
     await Promise.all([loadFiliais(),loadCategorias(),loadCatalogos(),loadPessoas(),loadNotifications(prof.id)]);
