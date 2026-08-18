@@ -1741,7 +1741,7 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
           <BtnSecondary onClick={()=>exportarEstoque("excel")}><FileSpreadsheet size={14}/>Exportar Excel</BtnSecondary>
           <BtnSecondary onClick={()=>exportarEstoque("pdf")}><FileText size={14}/>Exportar PDF</BtnSecondary>
           <BtnPrimary onClick={()=>setRetiradaAberta(true)}><ScanLine size={15}/>Retirar Ferramenta</BtnPrimary>
-          <BtnSecondary onClick={()=>setDevolucaoAberta(true)}><ScanLine size={15}/>Devolver Ferramenta</BtnSecondary>
+          <BtnPrimary onClick={()=>setDevolucaoAberta(true)}><ScanLine size={15}/>Devolver Ferramenta</BtnPrimary>
           {isAdmin&&<BtnSecondary onClick={()=>setNovaAberta(true)}><Plus size={15}/>Nova Ferramenta</BtnSecondary>}
         </div>
       </div>
