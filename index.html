@@ -1776,7 +1776,7 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
             {categorias.map(c=><option key={c.id} value={c.id}>{c.nome}</option>)}
           </select>
         </Field>
-        <Field label="Obrigatória">
+        <Field label="Obrigatoriedade">
           <select value={filtroObrigatoria} onChange={e=>setFiltroObrigatoria(e.target.value)} style={{...inputStyle,width:"auto"}}>
             <option value="">Todas</option>
             <option value="sim">Só obrigatórias</option>
