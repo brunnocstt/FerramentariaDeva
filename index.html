@@ -1220,17 +1220,16 @@ function FerramentaDetalheModal({ferramenta,onClose,onChanged,profile,filiais,ca
       </div>
 
       {isAdmin&&(
-        <div style={{display:"flex",gap:16,flexWrap:"wrap",marginBottom:16}}>
-          <button onClick={()=>setEditando(true)} style={{display:"flex",alignItems:"center",gap:6,border:"none",
-            background:"none",color:BLUE,fontSize:12,fontWeight:700,cursor:"pointer",padding:0}}>
-            <Pencil size={12}/>Editar dados cadastrais
-          </button>
-          {profile.userType==="admin_geral"&&(
-            <button onClick={alternarObrigatoria} disabled={salvandoObrigatoria} style={{display:"flex",alignItems:"center",gap:6,border:"none",
-              background:"none",color:BLUE,fontSize:12,fontWeight:700,cursor:salvandoObrigatoria?"default":"pointer",padding:0,opacity:salvandoObrigatoria?.5:1}}>
-              <ShieldCheck size={12}/>{ferramenta.catalogo?.obrigatoria?"Desmarcar como obrigatória":"Marcar como obrigatória"}
-            </button>
-          )}
+        <div style={{marginBottom:20}}>
+          <div style={{fontSize:11,fontWeight:700,color:"#9CA3AF",textTransform:"uppercase",marginBottom:8,letterSpacing:".4px"}}>Cadastro</div>
+          <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
+            <ChipButton Icon={Pencil} onClick={()=>setEditando(true)}>Editar dados cadastrais</ChipButton>
+            {profile.userType==="admin_geral"&&(
+              <ChipButton Icon={ShieldCheck} onClick={alternarObrigatoria} disabled={salvandoObrigatoria}>
+                {ferramenta.catalogo?.obrigatoria?"Desmarcar como obrigatória":"Marcar como obrigatória"}
+              </ChipButton>
+            )}
+          </div>
         </div>
       )}
 
@@ -1344,6 +1343,17 @@ function ModalTransferencia({ferramenta,filiais,profile,onClose,onDone}){
     </Modal>
   );
 }
+function ChipButton({Icon,children,onClick,disabled,danger}){
+  return(
+    <button onClick={onClick} disabled={disabled}
+      style={{display:"flex",alignItems:"center",gap:7,padding:"9px 14px",borderRadius:9,
+        border:`1.5px solid ${danger?"#FECACA":"#E5E7EB"}`,background:danger?"#FEF2F2":"#fff",
+        color:danger?"#B91C1C":"#111827",fontSize:12.5,fontWeight:700,
+        cursor:disabled?"default":"pointer",opacity:disabled?.5:1,whiteSpace:"nowrap"}}>
+      <Icon size={14}/>{children}
+    </button>
+  );
+}
 function InfoBox({label,value}){
   return(
     <div style={{padding:"9px 12px",borderRadius:9,background:"#F9FAFB",border:"1px solid #F1F5F9"}}>
@@ -1423,40 +1433,38 @@ function ModalEstoqueDetalhe({estoque,onClose,onChanged,profile,filiais}){
         <InfoBox label="Disponível" value={estoque.quantidade_disponivel}/>
         <InfoBox label="Localização" value={estoque.localizacao||"—"}/>
       </div>
-      {profile.userType==="admin_geral"&&(
-        <button onClick={alternarObrigatoria} disabled={salvandoObrigatoria} style={{display:"flex",alignItems:"center",gap:6,border:"none",
-          background:"none",color:BLUE,fontSize:12,fontWeight:700,cursor:salvandoObrigatoria?"default":"pointer",padding:0,marginBottom:14,opacity:salvandoObrigatoria?.5:1}}>
-          <ShieldCheck size={12}/>{estoque.catalogo?.obrigatoria?"Desmarcar como obrigatória":"Marcar como obrigatória"}
-        </button>
+      {(profile.userType==="admin_geral"||isAdmin)&&(
+        <div style={{marginBottom:20}}>
+          <div style={{fontSize:11,fontWeight:700,color:"#9CA3AF",textTransform:"uppercase",marginBottom:8,letterSpacing:".4px"}}>Cadastro</div>
+          <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:(ajustando||ajustandoLocal)?12:0}}>
+            {profile.userType==="admin_geral"&&(
+              <ChipButton Icon={ShieldCheck} onClick={alternarObrigatoria} disabled={salvandoObrigatoria}>
+                {estoque.catalogo?.obrigatoria?"Desmarcar como obrigatória":"Marcar como obrigatória"}
+              </ChipButton>
+            )}
+            {isAdmin&&!ajustando&&<ChipButton Icon={Pencil} onClick={()=>setAjustando(true)}>Ajustar quantidade total</ChipButton>}
+            {isAdmin&&!ajustandoLocal&&<ChipButton Icon={MapPin} onClick={()=>setAjustandoLocal(true)}>Ajustar localização</ChipButton>}
+          </div>
+          {isAdmin&&ajustando&&(
+            <div style={{display:"flex",gap:8,alignItems:"flex-end",marginBottom:ajustandoLocal?12:0}}>
+              <Field label="Nova quantidade total">
+                <input type="number" min="0" value={novaQtd} onChange={e=>setNovaQtd(e.target.value)} style={inputStyle}/>
+              </Field>
+              <BtnPrimary onClick={salvarQtd} loading={salvandoQtd}>Salvar</BtnPrimary>
+              <BtnSecondary onClick={()=>setAjustando(false)}>Cancelar</BtnSecondary>
+            </div>
+          )}
+          {isAdmin&&ajustandoLocal&&(
+            <div style={{display:"flex",gap:8,alignItems:"flex-end"}}>
+              <Field label="Nova localização">
+                <input value={novaLocal} onChange={e=>setNovaLocal(e.target.value)} style={inputStyle} placeholder="Ex.: Armário 3, Gaveta 2"/>
+              </Field>
+              <BtnPrimary onClick={salvarLocal} loading={salvandoLocal}>Salvar</BtnPrimary>
+              <BtnSecondary onClick={()=>setAjustandoLocal(false)}>Cancelar</BtnSecondary>
+            </div>
+          )}
+        </div>
       )}
-      {isAdmin&&(ajustando?(
-        <div style={{display:"flex",gap:8,alignItems:"flex-end",marginBottom:14}}>
-          <Field label="Nova quantidade total">
-            <input type="number" min="0" value={novaQtd} onChange={e=>setNovaQtd(e.target.value)} style={inputStyle}/>
-          </Field>
-          <BtnPrimary onClick={salvarQtd} loading={salvandoQtd}>Salvar</BtnPrimary>
-          <BtnSecondary onClick={()=>setAjustando(false)}>Cancelar</BtnSecondary>
-        </div>
-      ):(
-        <button onClick={()=>setAjustando(true)} style={{display:"flex",alignItems:"center",gap:6,border:"none",
-          background:"none",color:BLUE,fontSize:12,fontWeight:700,cursor:"pointer",padding:0,marginBottom:14}}>
-          <Pencil size={12}/>Ajustar quantidade total
-        </button>
-      ))}
-      {isAdmin&&(ajustandoLocal?(
-        <div style={{display:"flex",gap:8,alignItems:"flex-end",marginBottom:20}}>
-          <Field label="Nova localização">
-            <input value={novaLocal} onChange={e=>setNovaLocal(e.target.value)} style={inputStyle} placeholder="Ex.: Armário 3, Gaveta 2"/>
-          </Field>
-          <BtnPrimary onClick={salvarLocal} loading={salvandoLocal}>Salvar</BtnPrimary>
-          <BtnSecondary onClick={()=>setAjustandoLocal(false)}>Cancelar</BtnSecondary>
-        </div>
-      ):(
-        <button onClick={()=>setAjustandoLocal(true)} style={{display:"flex",alignItems:"center",gap:6,border:"none",
-          background:"none",color:BLUE,fontSize:12,fontWeight:700,cursor:"pointer",padding:0,marginBottom:20}}>
-          <Pencil size={12}/>Ajustar localização
-        </button>
-      ))}
 
       <div style={{marginBottom:20}}>
         <div style={{fontSize:11,fontWeight:700,color:"#9CA3AF",textTransform:"uppercase",marginBottom:8,letterSpacing:".4px"}}>Emprestado agora ({ativos.length})</div>
