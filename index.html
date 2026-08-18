@@ -2978,7 +2978,7 @@ function GestaoUsuariosView({profile,filiais}){
           </span>
         </td>
         <td style={{padding:"13px 16px",fontSize:12,color:u.matricula?"#374151":"#CBD5E1",fontWeight:500}}>
-          {u.matricula?`Mat. ${u.matricula}`:"—"}
+          {u.matricula||"—"}
         </td>
         <td style={{padding:"13px 16px"}}>
           <span style={{display:"inline-flex",alignItems:"center",gap:4,fontSize:11,fontWeight:700,
