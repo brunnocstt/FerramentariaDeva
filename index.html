@@ -96,7 +96,8 @@ import{
   Lock,Mail,EyeOff,EyeIcon,Check,AlertCircle,RefreshCw,Building2,
   Clock,CheckCircle2,Pencil,Trash2,Menu,Filter,Wrench,PackageCheck,
   ClipboardList,ArrowLeftRight,Hash,MapPin,AlertTriangle,LayoutDashboard,
-  FileText,UserCheck,PackagePlus,PackageX,Ban,History,Tag,ScanLine,FileSpreadsheet
+  FileText,UserCheck,PackagePlus,PackageX,Ban,History,Tag,ScanLine,FileSpreadsheet,
+  Shield,ToggleRight,ToggleLeft,Power
 }from "https://esm.sh/lucide-react?deps=react@18";
 
 /* ── SUPABASE ────────────────────────────────────── */
@@ -2876,6 +2877,18 @@ function ModalUsuario({onClose,onSaved,filiais,profile,editando}){
   );
 }
 
+const PERFIL_INFO={
+  admin_geral:{label:"Administrador Geral",Icon:Shield,bg:"#EFF6FF",color:"#1D4ED8"},
+  admin_area:{label:"Gestor de Filial",Icon:Building2,bg:"#F5F3FF",color:"#7C3AED"},
+  colaborador:{label:"Colaborador",Icon:Users,bg:"#F8FAFC",color:"#64748B"},
+};
+const pillSelectStyle={
+  padding:"8px 30px 8px 13px",borderRadius:99,border:"1.5px solid #E2E8F0",
+  background:"url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%2394A3B8' stroke-width='1.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E\") right 13px center no-repeat #F8FAFC",
+  color:"#374151",fontSize:12.5,fontWeight:600,cursor:"pointer",appearance:"none",
+  WebkitAppearance:"none",MozAppearance:"none",flexShrink:0,
+};
+
 function GestaoUsuariosView({profile,filiais}){
   const[lista,setLista]=useState([]);
   const[acessosExtras,setAcessosExtras]=useState({});
@@ -2884,6 +2897,8 @@ function GestaoUsuariosView({profile,filiais}){
   const[editando,setEditando]=useState(null);
   const[senhaTempInfo,setSenhaTempInfo]=useState(null);
   const[erroAcao,setErroAcao]=useState("");
+  const[busca,setBusca]=useState("");
+  const[filtroPerfil,setFiltroPerfil]=useState("");
 
   async function load(){
     setLoading(true);
@@ -2925,66 +2940,156 @@ function GestaoUsuariosView({profile,filiais}){
     setSenhaTempInfo({email:u.email,tempPassword:json.tempPassword});
   }
 
-  const USER_TYPE_LABEL={admin_geral:"Administrador Geral",admin_area:"Administrador de Filial",colaborador:"Colaborador"};
+  const listaFiltrada=useMemo(()=>{
+    const termo=busca.trim().toLowerCase();
+    return lista.filter(u=>{
+      if(filtroPerfil&&u.user_type!==filtroPerfil)return false;
+      if(termo&&!(u.name?.toLowerCase().includes(termo)||u.email?.toLowerCase().includes(termo)))return false;
+      return true;
+    });
+  },[lista,busca,filtroPerfil]);
+  const ativos=listaFiltrada.filter(u=>u.is_active);
+  const inativos=listaFiltrada.filter(u=>!u.is_active);
+  const COLS=6;
+
+  function LinhaUsuario({u}){
+    const perfil=PERFIL_INFO[u.user_type]||PERFIL_INFO.colaborador;
+    return(
+      <tr className="row-hover" style={{borderTop:"1px solid #F1F5F9",opacity:u.is_active?1:.55}}>
+        <td style={{padding:"13px 16px"}}>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <div style={{width:32,height:32,borderRadius:"50%",background:u.color||BLUE,color:"#fff",
+              display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:11.2,
+              flexShrink:0,letterSpacing:"-.5px"}}>
+              {getInitials(u.name)}
+            </div>
+            <div>
+              <div style={{fontSize:13,fontWeight:700,color:"#0F172A"}}>
+                {u.name}{!u.is_active&&<span style={{color:"#B91C1C",fontSize:11,fontWeight:700}}> (inativo)</span>}
+              </div>
+              <div style={{fontSize:11,color:"#94A3B8",marginTop:1}}>{u.email}</div>
+            </div>
+          </div>
+        </td>
+        <td style={{padding:"13px 16px"}}>
+          <span style={{display:"inline-flex",alignItems:"center",gap:5,padding:"3px 10px",borderRadius:99,
+            fontSize:11,fontWeight:700,background:perfil.bg,color:perfil.color,whiteSpace:"nowrap"}}>
+            <perfil.Icon size={11}/>{perfil.label}
+          </span>
+        </td>
+        <td style={{padding:"13px 16px",fontSize:12,color:u.matricula?"#374151":"#CBD5E1",fontWeight:500}}>
+          {u.matricula?`Mat. ${u.matricula}`:"—"}
+        </td>
+        <td style={{padding:"13px 16px"}}>
+          <span style={{display:"inline-flex",alignItems:"center",gap:4,fontSize:11,fontWeight:700,
+            color:u.gerente_pos_vendas?"#1D4ED8":"#CBD5E1"}}>
+            {u.gerente_pos_vendas?<ToggleRight size={18} color="#1D4ED8"/>:<ToggleLeft size={18} color="#CBD5E1"/>} {u.gerente_pos_vendas?"Sim":"Não"}
+          </span>
+        </td>
+        <td style={{padding:"13px 16px",maxWidth:200}}>
+          <span style={{fontSize:12,color:"#64748B",fontWeight:500}}>{u.filial?.nome||"Todas as filiais"}</span>
+          {acessosExtras[u.id]?.length>0&&(
+            <span style={{display:"block",fontSize:10.5,color:BLUE,fontWeight:700,marginTop:2}}>
+              + {acessosExtras[u.id].join(", ")}
+            </span>
+          )}
+        </td>
+        <td style={{padding:"13px 16px"}}>
+          {u.is_active?(
+            <span style={{display:"inline-flex",alignItems:"center",gap:5,padding:"3px 10px",borderRadius:99,
+              fontSize:11,fontWeight:700,background:"#ECFDF5",color:"#059669"}}>
+              <span style={{width:6,height:6,borderRadius:"50%",background:"#059669"}}/>Ativo
+            </span>
+          ):(
+            <span style={{display:"inline-flex",alignItems:"center",gap:5,padding:"3px 10px",borderRadius:99,
+              fontSize:11,fontWeight:700,background:"#FEF2F2",color:"#B91C1C"}}>
+              <span style={{width:6,height:6,borderRadius:"50%",background:"#B91C1C"}}/>Inativo
+            </span>
+          )}
+        </td>
+        <td style={{padding:"13px 16px"}}>
+          <div style={{display:"flex",gap:6,alignItems:"center"}}>
+            <button title="Editar" onClick={()=>setEditando(u)} style={{border:"1px solid #E2E8F0",background:"#fff",
+              borderRadius:7,padding:"5px 8px",cursor:"pointer",display:"flex",alignItems:"center",color:"#64748B"}}>
+              <Pencil size={13}/>
+            </button>
+            <button title="Redefinir senha" onClick={()=>resetSenha(u)} style={{border:"1px solid #E2E8F0",background:"#fff",
+              borderRadius:7,padding:"5px 8px",cursor:"pointer",display:"flex",alignItems:"center",color:"#64748B"}}>
+              <Lock size={13}/>
+            </button>
+            <button title={u.is_active?"Desativar":"Ativar"} onClick={()=>toggleAtivo(u)} style={{border:"1px solid #E2E8F0",background:"#fff",
+              borderRadius:7,padding:"5px 8px",cursor:"pointer",display:"flex",alignItems:"center",color:u.is_active?"#EF4444":"#059669"}}>
+              <Power size={13}/>
+            </button>
+          </div>
+        </td>
+      </tr>
+    );
+  }
 
   return(
     <>
-      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16,flexWrap:"wrap",gap:12}}>
-        <div>
-          <p style={{fontSize:15,fontWeight:800,color:"#111827",margin:0}}>Gestão de Usuários</p>
-          <p style={{fontSize:12,color:"#9CA3AF",marginTop:2}}>{lista.length} usuário(s)</p>
+      <h1 style={{fontSize:22,fontWeight:800,color:"#111827",margin:"0 0 4px"}}>Gestão de Usuários</h1>
+      <p style={{fontSize:13,color:"#6B7280",margin:"0 0 18px"}}>{lista.length} usuário(s)</p>
+      <ErrorBox>{erroAcao}</ErrorBox>
+
+      <div style={{background:"#fff",borderRadius:14,padding:"14px 18px",border:"1px solid #F1F5F9",
+        display:"flex",alignItems:"center",gap:10,flexWrap:"wrap",marginBottom:16}}>
+        <div style={{flex:1,minWidth:180,display:"flex",alignItems:"center",gap:8,
+          border:"1.5px solid #E2E8F0",borderRadius:9,padding:"8px 12px"}}>
+          <Search size={14} color="#94A3B8"/>
+          <input placeholder="Buscar por nome ou e-mail..." value={busca} onChange={e=>setBusca(e.target.value)}
+            style={{border:"none",fontSize:13,color:"#374151",width:"100%",background:"transparent",outline:"none"}}/>
+        </div>
+        <div style={{display:"flex",flexDirection:"column",gap:4}}>
+          <span style={{fontSize:9.5,fontWeight:700,color:"#94A3B8",textTransform:"uppercase",letterSpacing:".06em",paddingLeft:3}}>Perfil</span>
+          <select value={filtroPerfil} onChange={e=>setFiltroPerfil(e.target.value)} style={pillSelectStyle}>
+            <option value="">Todos</option>
+            <option value="admin_geral">Administrador Geral</option>
+            <option value="admin_area">Gestor de Filial</option>
+            <option value="colaborador">Colaborador</option>
+          </select>
         </div>
         <BtnPrimary onClick={()=>setNovoAberto(true)}><UserPlus size={15}/>Novo Usuário</BtnPrimary>
       </div>
-      <ErrorBox>{erroAcao}</ErrorBox>
-      {loading?<div style={{padding:60,textAlign:"center"}}><Spinner size={20}/></div>:(
-        <div style={{display:"flex",flexDirection:"column",gap:10}}>
-          {lista.map(u=>(
-            <div key={u.id} style={{background:"#fff",border:"1px solid #F1F5F9",borderRadius:14,padding:14,
-              display:"flex",alignItems:"center",gap:12,flexWrap:"wrap",opacity:u.is_active?1:.55}}>
-              <div style={{width:36,height:36,borderRadius:10,background:u.color||BLUE,flexShrink:0,
-                display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:800,color:"#fff"}}>
-                {getInitials(u.name)}
-              </div>
-              <div style={{flex:1,minWidth:140}}>
-                <div style={{fontSize:13.5,fontWeight:700,color:"#111827",display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
-                  {u.name}{!u.is_active&&<span style={{color:"#B91C1C",fontSize:11,fontWeight:700}}>(inativo)</span>}
-                  {u.gerente_pos_vendas&&(
-                    <span style={{fontSize:10,fontWeight:800,color:"#1955FF",background:"#EFF4FF",padding:"2px 7px",
-                      borderRadius:99,textTransform:"uppercase",letterSpacing:".3px"}}>Pós-Vendas</span>
-                  )}
-                </div>
-                <div style={{fontSize:12,color:"#6B7280"}}>{u.email}</div>
-              </div>
-              <div style={{fontSize:12,color:"#374151",minWidth:150}}>{USER_TYPE_LABEL[u.user_type]}</div>
-              <div style={{fontSize:12,color:"#6B7280",minWidth:120}}>
-                {u.filial?.nome||"Todas as filiais"}
-                {acessosExtras[u.id]?.length>0&&(
-                  <span style={{display:"block",fontSize:10.5,color:BLUE,fontWeight:700,marginTop:2}}>
-                    + {acessosExtras[u.id].join(", ")}
-                  </span>
-                )}
-              </div>
-              <div style={{fontSize:12,color:"#9CA3AF",minWidth:90}}>{u.matricula?`Mat. ${u.matricula}`:"—"}</div>
-              <div style={{display:"flex",gap:6}}>
-                <button onClick={()=>setEditando(u)} title="Editar" style={{border:"1px solid #E5E7EB",background:"#fff",
-                  borderRadius:8,width:30,height:30,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",color:"#6B7280"}}>
-                  <Pencil size={13}/>
-                </button>
-                <button onClick={()=>resetSenha(u)} title="Redefinir senha" style={{border:"1px solid #E5E7EB",background:"#fff",
-                  borderRadius:8,width:30,height:30,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",color:"#6B7280"}}>
-                  <RefreshCw size={13}/>
-                </button>
-                <button onClick={()=>toggleAtivo(u)} title={u.is_active?"Desativar":"Ativar"}
-                  style={{border:"1px solid #E5E7EB",background:"#fff",borderRadius:8,width:30,height:30,
-                    display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",color:u.is_active?"#B91C1C":"#059669"}}>
-                  {u.is_active?<Ban size={13}/>:<Check size={13}/>}
-                </button>
-              </div>
-            </div>
-          ))}
+
+      {loading?<div style={{padding:60,textAlign:"center"}}><Spinner size={20}/></div>:
+        listaFiltrada.length===0?(
+          <div style={{background:"#fff",borderRadius:14,border:"1px solid #F1F5F9"}}>
+            <EmptyState icon={Users} title="Nenhum usuário encontrado" text="Ajuste a busca ou os filtros."/>
+          </div>
+        ):(
+        <div style={{background:"#fff",borderRadius:14,border:"1px solid #F1F5F9",overflow:"hidden"}}>
+          <div style={{overflowX:"auto"}}>
+            <table style={{width:"100%",borderCollapse:"collapse"}}>
+              <thead>
+                <tr style={{background:"#F8FAFC"}}>
+                  {["Usuário","Perfil","Matrícula","Pós-Vendas","Filial","Status",""].map(h=>(
+                    <th key={h} style={{padding:"10px 16px",textAlign:"left",fontSize:10,fontWeight:700,
+                      color:"#94A3B8",whiteSpace:"nowrap",letterSpacing:".06em",textTransform:"uppercase"}}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {ativos.length>0&&<tr><td colSpan={COLS+1} style={{padding:"8px 16px",background:"#F8FAFC",
+                  fontSize:11,fontWeight:800,color:"#059669",textTransform:"uppercase",letterSpacing:".06em"}}>
+                  Ativos <span style={{color:"#94A3B8",fontWeight:600,textTransform:"none",letterSpacing:0}}>({ativos.length})</span>
+                </td></tr>}
+                {ativos.map(u=><LinhaUsuario key={u.id} u={u}/>)}
+                {inativos.length>0&&<tr><td colSpan={COLS+1} style={{padding:"8px 16px",background:"#F8FAFC",
+                  fontSize:11,fontWeight:800,color:"#B91C1C",textTransform:"uppercase",letterSpacing:".06em"}}>
+                  Inativos <span style={{color:"#94A3B8",fontWeight:600,textTransform:"none",letterSpacing:0}}>({inativos.length})</span>
+                </td></tr>}
+                {inativos.map(u=><LinhaUsuario key={u.id} u={u}/>)}
+              </tbody>
+            </table>
+          </div>
+          <div style={{padding:"10px 16px",borderTop:"1px solid #F1F5F9",fontSize:12,color:"#94A3B8",fontWeight:500}}>
+            {listaFiltrada.length} de {lista.length} usuário(s)
+          </div>
         </div>
       )}
+
       {novoAberto&&<ModalUsuario filiais={filiais} profile={profile}
         onClose={()=>setNovoAberto(false)} onSaved={()=>{setNovoAberto(false);load();}}/>}
       {editando&&<ModalUsuario filiais={filiais} profile={profile} editando={editando}
