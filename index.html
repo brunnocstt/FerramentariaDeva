@@ -874,12 +874,14 @@ function DashboardView({profile,filiais}){
     let cancelled=false;
     async function load(){
       setLoading(true);
-      let q=supabase.from("ferramentas_unidade").select("status,data_proxima_afericao,ativo");
-      if(profile.userType!=="admin_geral")q=q.in("filial_id",profile.filialIds);
-      const{data,error}=await q;
+      let q=supabase.from("ferramentas_unidade").select("status,data_proxima_afericao,ativo,data_validade_licenca,catalogo:catalogo_id(requer_licenca)");
+      let qE=supabase.from("estoque_pool").select("data_validade_licenca,catalogo:catalogo_id(requer_licenca)");
+      if(profile.userType!=="admin_geral"){q=q.in("filial_id",profile.filialIds);qE=qE.in("filial_id",profile.filialIds);}
+      const[{data,error},{data:dataE}]=await Promise.all([q,qE]);
       if(cancelled)return;
       if(!error&&data){
-        const s={total:data.length,disponivel:0,com_colaborador:0,em_afericao:0,em_conserto:0,extraviada:0,baixada:0,vencidas:0,proximas:0};
+        const s={total:data.length,disponivel:0,com_colaborador:0,em_afericao:0,em_conserto:0,extraviada:0,baixada:0,
+          vencidas:0,proximas:0,licencasVencidas:0,licencasProximas:0};
         const hoje=new Date();hoje.setHours(0,0,0,0);
         data.forEach(f=>{
           s[f.status]=(s[f.status]||0)+1;
@@ -887,6 +889,18 @@ function DashboardView({profile,filiais}){
             const d=new Date(f.data_proxima_afericao);
             if(d<hoje)s.vencidas++;
             else if(diasEntre(hoje,d)<=7)s.proximas++;
+          }
+          if(f.ativo&&f.catalogo?.requer_licenca&&f.data_validade_licenca){
+            const d=new Date(f.data_validade_licenca);
+            if(d<hoje)s.licencasVencidas++;
+            else if(diasEntre(hoje,d)<=7)s.licencasProximas++;
+          }
+        });
+        (dataE||[]).forEach(e=>{
+          if(e.catalogo?.requer_licenca&&e.data_validade_licenca){
+            const d=new Date(e.data_validade_licenca);
+            if(d<hoje)s.licencasVencidas++;
+            else if(diasEntre(hoje,d)<=7)s.licencasProximas++;
           }
         });
         setStats(s);
@@ -913,12 +927,18 @@ function DashboardView({profile,filiais}){
         <StatCard label="Com Colaborador" value={stats.com_colaborador||0} Icon={Users} color={BLUE}/>
         <StatCard label="Em Aferição" value={stats.em_afericao||0} Icon={Clock} color="#D97706"/>
       </div>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:14}}>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:14,marginBottom:14}}>
         <StatCard label="Em Reparo" value={stats.em_conserto||0} Icon={PackageX} color="#DB2777"/>
         <StatCard label="Extraviadas" value={stats.extraviada||0} Icon={AlertTriangle} color="#B91C1C"/>
         <StatCard label="Aferições Vencidas" value={stats.vencidas} Icon={AlertCircle} color="#B91C1C"/>
         <StatCard label="Aferições Próx. 7 dias" value={stats.proximas} Icon={Calendar} color="#D97706"/>
       </div>
+      {(stats.licencasVencidas>0||stats.licencasProximas>0)&&(
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:14}}>
+          <StatCard label="Licenças Vencidas" value={stats.licencasVencidas} Icon={AlertCircle} color="#B91C1C"/>
+          <StatCard label="Licenças Próx. 7 dias" value={stats.licencasProximas} Icon={Calendar} color="#D97706"/>
+        </div>
+      )}
       {profile.userType!=="colaborador"&&<UsoAoVivoPanel/>}
     </div>
   );
@@ -945,6 +965,8 @@ function ModalNovaFerramenta({onClose,onSaved,filiais,categorias,catalogos,profi
   const[dataProximaAfericao,setDataProximaAfericao]=useState(editandoUnidade?.data_proxima_afericao||"");
   const[observacoes,setObservacoes]=useState(editandoUnidade?.observacoes||"");
   const[localizacao,setLocalizacao]=useState(editandoUnidade?.localizacao||"");
+  const[numeroLicenca,setNumeroLicenca]=useState(editandoUnidade?.numero_licenca||"");
+  const[dataValidadeLicenca,setDataValidadeLicenca]=useState(editandoUnidade?.data_validade_licenca||"");
   const[loading,setLoading]=useState(false);
   const[error,setError]=useState("");
 
@@ -955,6 +977,7 @@ function ModalNovaFerramenta({onClose,onSaved,filiais,categorias,catalogos,profi
     ? categorias.find(c=>c.id===novoTipoCategoriaId)
     : categorias.find(c=>c.id===catalogoAtual?.categoria_id);
   const requerAfericao=!!categoriaAtual?.requer_afericao;
+  const requerLicenca=!!catalogoAtual?.requer_licenca;
   const controleIndividual=categoriaAtual?.controle_individual!==false; // default true se ainda não sabemos
 
   async function salvar(){
@@ -963,7 +986,9 @@ function ModalNovaFerramenta({onClose,onSaved,filiais,categorias,catalogos,profi
       if(!codigo){setError("Preencha o código.");return;}
       setLoading(true);
       const{error:err}=await supabase.from("ferramentas_unidade")
-        .update({codigo,observacoes:observacoes||null,localizacao:localizacao.trim()||null}).eq("id",editandoUnidade.id);
+        .update({codigo,observacoes:observacoes||null,localizacao:localizacao.trim()||null,
+          numero_licenca:requerLicenca?(numeroLicenca.trim()||null):null,
+          data_validade_licenca:requerLicenca?(dataValidadeLicenca||null):null}).eq("id",editandoUnidade.id);
       setLoading(false);
       if(err){setError(traduzErro(err));return;}
       onSaved();
@@ -989,6 +1014,8 @@ function ModalNovaFerramenta({onClose,onSaved,filiais,categorias,catalogos,profi
         catalogo_id:finalCatalogoId,filial_id:filialId,codigo,
         data_proxima_afericao:requerAfericao?(dataProximaAfericao||null):null,observacoes:observacoes||null,
         localizacao:localizacao.trim()||null,
+        numero_licenca:requerLicenca?(numeroLicenca.trim()||null):null,
+        data_validade_licenca:requerLicenca?(dataValidadeLicenca||null):null,
       });
       setLoading(false);
       if(err){setError(traduzErro(err));return;}
@@ -1077,6 +1104,14 @@ function ModalNovaFerramenta({onClose,onSaved,filiais,categorias,catalogos,profi
         {!editandoUnidade&&controleIndividual&&requerAfericao&&<Field label="Próxima aferição programada" hint="Deixe em branco se ainda não tiver uma data definida.">
           <input type="date" value={dataProximaAfericao} onChange={e=>setDataProximaAfericao(e.target.value)} style={inputStyle}/>
         </Field>}
+        {controleIndividual&&requerLicenca&&<>
+          <Field label="Número da licença" hint="Chave/identificador da licença de software, se houver.">
+            <input value={numeroLicenca} onChange={e=>setNumeroLicenca(e.target.value)} style={inputStyle} placeholder="Ex.: XXXX-XXXX-XXXX"/>
+          </Field>
+          <Field label="Validade da licença">
+            <input type="date" value={dataValidadeLicenca} onChange={e=>setDataValidadeLicenca(e.target.value)} style={inputStyle}/>
+          </Field>
+        </>}
         <Field label="Localização na filial" hint="Onde essa ferramenta fica guardada fisicamente (ex.: Armário 3, Gaveta 2).">
           <input value={localizacao} onChange={e=>setLocalizacao(e.target.value)} style={inputStyle} placeholder="Ex.: Armário 3, Gaveta 2"/>
         </Field>
@@ -1179,6 +1214,8 @@ function FerramentaDetalheModal({ferramenta,onClose,onChanged,profile,filiais,ca
   const filialNome=filiais.find(f=>f.id===ferramenta.filial_id)?.nome||"—";
   const categoriaObj=categorias.find(c=>c.id===ferramenta.catalogo?.categoria_id);
   const requerAfericao=!!categoriaObj?.requer_afericao;
+  const requerLicenca=!!ferramenta.catalogo?.requer_licenca;
+  const licencaVencida=requerLicenca&&ferramenta.data_validade_licenca&&new Date(ferramenta.data_validade_licenca)<new Date(new Date().toDateString());
   const ACTIONS_BY_STATUS={
     disponivel:[
       {tipo:"retirada",label:"Registrar Retirada",Icon:PackagePlus},
@@ -1239,6 +1276,11 @@ function FerramentaDetalheModal({ferramenta,onClose,onChanged,profile,filiais,ca
           <InfoBox label="Próxima aferição" value={fmtDate(ferramenta.data_proxima_afericao)}/>
         </>}
         {ferramenta.status==="em_afericao"&&<InfoBox label="Saída p/ aferição" value={fmtDate(ferramenta.data_saida_afericao)}/>}
+        {requerLicenca&&<>
+          <InfoBox label="Número da licença" value={ferramenta.numero_licenca||"—"}/>
+          <InfoBox label="Validade da licença" value={ferramenta.data_validade_licenca?
+            <span style={{color:licencaVencida?"#B91C1C":"#111827"}}>{fmtDate(ferramenta.data_validade_licenca)}{licencaVencida?" (vencida)":""}</span>:"—"}/>
+        </>}
       </div>
 
       {acoes.length>0&&(
@@ -1469,11 +1511,19 @@ function ModalEstoqueDetalhe({estoque,onClose,onChanged,profile,filiais}){
   const[ajustandoLocal,setAjustandoLocal]=useState(false);
   const[novaLocal,setNovaLocal]=useState(estoque.localizacao||"");
   const[salvandoLocal,setSalvandoLocal]=useState(false);
+  const[ajustandoNumLicenca,setAjustandoNumLicenca]=useState(false);
+  const[novoNumLicenca,setNovoNumLicenca]=useState(estoque.numero_licenca||"");
+  const[salvandoNumLicenca,setSalvandoNumLicenca]=useState(false);
+  const[ajustandoValidadeLicenca,setAjustandoValidadeLicenca]=useState(false);
+  const[novaValidadeLicenca,setNovaValidadeLicenca]=useState(estoque.data_validade_licenca||"");
+  const[salvandoValidadeLicenca,setSalvandoValidadeLicenca]=useState(false);
   const[transferindo,setTransferindo]=useState(false);
   const[error,setError]=useState("");
   const[salvandoObrigatoria,setSalvandoObrigatoria]=useState(false);
   const isAdmin=profile.userType==="admin_geral"||profile.userType==="admin_area";
   const filialNome=filiais.find(f=>f.id===estoque.filial_id)?.nome||"—";
+  const requerLicenca=!!estoque.catalogo?.requer_licenca;
+  const licencaVencida=requerLicenca&&estoque.data_validade_licenca&&new Date(estoque.data_validade_licenca)<new Date(new Date().toDateString());
 
   async function alternarObrigatoria(){
     setSalvandoObrigatoria(true);
@@ -1512,6 +1562,24 @@ function ModalEstoqueDetalhe({estoque,onClose,onChanged,profile,filiais}){
     onChanged();
   }
 
+  async function salvarNumLicenca(){
+    setSalvandoNumLicenca(true);setError("");
+    const{error:err}=await supabase.from("estoque_pool").update({numero_licenca:novoNumLicenca.trim()||null}).eq("id",estoque.id);
+    setSalvandoNumLicenca(false);
+    if(err){setError(traduzErro(err));return;}
+    setAjustandoNumLicenca(false);
+    onChanged();
+  }
+
+  async function salvarValidadeLicenca(){
+    setSalvandoValidadeLicenca(true);setError("");
+    const{error:err}=await supabase.from("estoque_pool").update({data_validade_licenca:novaValidadeLicenca||null}).eq("id",estoque.id);
+    setSalvandoValidadeLicenca(false);
+    if(err){setError(traduzErro(err));return;}
+    setAjustandoValidadeLicenca(false);
+    onChanged();
+  }
+
   const ativos=emprestimos.filter(e=>!e.data_devolucao);
   const historico=emprestimos.filter(e=>e.data_devolucao);
 
@@ -1547,6 +1615,19 @@ function ModalEstoqueDetalhe({estoque,onClose,onChanged,profile,filiais}){
           <EditInline value={novaLocal} onChange={e=>setNovaLocal(e.target.value)}
             onSave={salvarLocal} onCancel={()=>setAjustandoLocal(false)} saving={salvandoLocal}/>
         </EditableInfoBox>
+        {requerLicenca&&<>
+          <EditableInfoBox label="Número da licença" value={estoque.numero_licenca||"—"}
+            editing={isAdmin&&ajustandoNumLicenca} onEdit={isAdmin?()=>setAjustandoNumLicenca(true):null}>
+            <EditInline value={novoNumLicenca} onChange={e=>setNovoNumLicenca(e.target.value)}
+              onSave={salvarNumLicenca} onCancel={()=>setAjustandoNumLicenca(false)} saving={salvandoNumLicenca}/>
+          </EditableInfoBox>
+          <EditableInfoBox label="Validade da licença" value={estoque.data_validade_licenca?
+            <span style={{color:licencaVencida?"#B91C1C":"#111827"}}>{fmtDate(estoque.data_validade_licenca)}{licencaVencida?" (vencida)":""}</span>:"—"}
+            editing={isAdmin&&ajustandoValidadeLicenca} onEdit={isAdmin?()=>setAjustandoValidadeLicenca(true):null}>
+            <EditInline type="date" value={novaValidadeLicenca} onChange={e=>setNovaValidadeLicenca(e.target.value)}
+              onSave={salvarValidadeLicenca} onCancel={()=>setAjustandoValidadeLicenca(false)} saving={salvandoValidadeLicenca}/>
+          </EditableInfoBox>
+        </>}
       </div>
 
       {estoque.quantidade_disponivel>0&&(
@@ -1810,8 +1891,8 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
 
   async function load(){
     setLoading(true);
-    let qU=supabase.from("ferramentas_unidade").select("*, colaborador_atual:colaborador_atual_id(name), catalogo:catalogo_id(nome,categoria_id,obrigatoria)").order("codigo");
-    let qE=supabase.from("estoque_pool").select("*, catalogo:catalogo_id(nome,categoria_id,obrigatoria)");
+    let qU=supabase.from("ferramentas_unidade").select("*, colaborador_atual:colaborador_atual_id(name), catalogo:catalogo_id(nome,categoria_id,obrigatoria,requer_licenca)").order("codigo");
+    let qE=supabase.from("estoque_pool").select("*, catalogo:catalogo_id(nome,categoria_id,obrigatoria,requer_licenca)");
     if(filtroFilial){qU=qU.eq("filial_id",filtroFilial);qE=qE.eq("filial_id",filtroFilial);}
     else if(profile.userType!=="admin_geral"){qU=qU.in("filial_id",profile.filialIds);qE=qE.in("filial_id",profile.filialIds);}
     if(filtroStatus)qU=qU.eq("status",filtroStatus);
@@ -2099,7 +2180,7 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
         pessoasFilial={pessoasFilial}
         onClose={()=>setSelecionada(null)}
         onChanged={()=>{load();
-          supabase.from("ferramentas_unidade").select("*, colaborador_atual:colaborador_atual_id(name), catalogo:catalogo_id(nome,categoria_id,obrigatoria)").eq("id",selecionada.id).single()
+          supabase.from("ferramentas_unidade").select("*, colaborador_atual:colaborador_atual_id(name), catalogo:catalogo_id(nome,categoria_id,obrigatoria,requer_licenca)").eq("id",selecionada.id).single()
             .then(({data})=>{if(data)setSelecionada(data);});
         }}/>}
       {estoqueSelecionado&&<ModalEstoqueDetalhe estoque={estoqueSelecionado} profile={profile} filiais={filiais}
@@ -3209,17 +3290,34 @@ function GestaoUsuariosView({profile,filiais}){
 function RelatoriosView({profile,filiais}){
   const isMobile=useIsMobile();
   const[ferramentas,setFerramentas]=useState([]);
+  const[estoques,setEstoques]=useState([]);
   const[loading,setLoading]=useState(true);
 
   useEffect(()=>{
-    let q=supabase.from("ferramentas_unidade").select("*, filial:filial_id(nome), colaborador_atual:colaborador_atual_id(name), catalogo:catalogo_id(nome)").eq("ativo",true);
-    if(profile.userType!=="admin_geral")q=q.in("filial_id",profile.filialIds);
-    q.then(({data,error})=>{if(!error)setFerramentas(data||[]);setLoading(false);});
+    let q=supabase.from("ferramentas_unidade").select("*, filial:filial_id(nome), colaborador_atual:colaborador_atual_id(name), catalogo:catalogo_id(nome,requer_licenca)").eq("ativo",true);
+    let qE=supabase.from("estoque_pool").select("*, filial:filial_id(nome), catalogo:catalogo_id(nome,requer_licenca)");
+    if(profile.userType!=="admin_geral"){q=q.in("filial_id",profile.filialIds);qE=qE.in("filial_id",profile.filialIds);}
+    Promise.all([q,qE]).then(([{data:dU,error:eU},{data:dE,error:eE}])=>{
+      if(!eU)setFerramentas(dU||[]);
+      if(!eE)setEstoques(dE||[]);
+      setLoading(false);
+    });
   },[profile.filialIds]);
 
   const hoje=new Date();hoje.setHours(0,0,0,0);
   const vencidas=ferramentas.filter(f=>f.data_proxima_afericao&&new Date(f.data_proxima_afericao)<hoje&&f.status!=="em_afericao");
   const proximas=ferramentas.filter(f=>f.data_proxima_afericao&&diasEntre(hoje,new Date(f.data_proxima_afericao))<=7&&diasEntre(hoje,new Date(f.data_proxima_afericao))>=0&&f.status!=="em_afericao");
+
+  // Licença: existe tanto pra unidade individual quanto pra estoque por quantidade
+  // (ex.: Rastreador UDT é cadastrado como estoque) — normaliza os dois num formato só.
+  const licencas=[
+    ...ferramentas.filter(f=>f.catalogo?.requer_licenca&&f.data_validade_licenca)
+      .map(f=>({key:"u-"+f.id,codigo:f.codigo,nome:nomeLimpo(f.catalogo?.nome,f.codigo),filialNome:f.filial?.nome,data:f.data_validade_licenca})),
+    ...estoques.filter(e=>e.catalogo?.requer_licenca&&e.data_validade_licenca)
+      .map(e=>({key:"e-"+e.id,codigo:null,nome:e.catalogo?.nome,filialNome:e.filial?.nome,data:e.data_validade_licenca})),
+  ];
+  const licencasVencidas=licencas.filter(l=>new Date(l.data)<hoje);
+  const licencasProximas=licencas.filter(l=>diasEntre(hoje,new Date(l.data))<=7&&diasEntre(hoje,new Date(l.data))>=0);
 
   function exportarAfericoes(){
     const rows=[...vencidas,...proximas].map(f=>({
@@ -3231,29 +3329,60 @@ function RelatoriosView({profile,filiais}){
     XLSX.utils.book_append_sheet(wb,ws,"Aferições");
     XLSX.writeFile(wb,"relatorio_afericoes.xlsx");
   }
+  function exportarLicencas(){
+    const rows=[...licencasVencidas,...licencasProximas].map(l=>({
+      Código:l.codigo||"",Nome:l.nome,Filial:l.filialNome,"Validade da Licença":fmtDate(l.data),
+    }));
+    const ws=XLSX.utils.json_to_sheet(rows);
+    const wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb,ws,"Licenças");
+    XLSX.writeFile(wb,"relatorio_licencas.xlsx");
+  }
 
   return(
     <div className="fade" style={{padding:isMobile?"20px 16px":"28px 32px"}}>
       <h1 style={{fontSize:22,fontWeight:800,color:"#111827",margin:"0 0 4px"}}>Relatórios</h1>
-      <p style={{fontSize:13,color:"#6B7280",margin:"0 0 24px"}}>Aferições vencidas e próximas do prazo.</p>
+      <p style={{fontSize:13,color:"#6B7280",margin:"0 0 24px"}}>Aferições e licenças vencidas ou próximas do prazo.</p>
       {loading?<div style={{padding:60,textAlign:"center"}}><Spinner size={20}/></div>:(
         <>
-          <div style={{display:"flex",justifyContent:"flex-end",marginBottom:12}}>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
+            <p style={{fontSize:13,fontWeight:800,color:"#111827",margin:0}}>Aferições</p>
             <BtnSecondary onClick={exportarAfericoes}><FileSpreadsheet size={14}/>Exportar Excel</BtnSecondary>
           </div>
           <div style={{marginBottom:24}}>
             <h3 style={{fontSize:14,fontWeight:800,color:"#B91C1C",margin:"0 0 10px"}}>Vencidas ({vencidas.length})</h3>
             {vencidas.length===0?<p style={{fontSize:13,color:"#9CA3AF"}}>Nenhuma aferição vencida.</p>:(
               <div style={{display:"flex",flexDirection:"column",gap:8}}>
-                {vencidas.map(f=><RelatorioLinha key={f.id} f={f}/>)}
+                {vencidas.map(f=><RelatorioLinha key={f.id} codigo={f.codigo} nome={nomeLimpo(f.catalogo?.nome,f.codigo)} filialNome={f.filial?.nome} data={f.data_proxima_afericao}/>)}
+              </div>
+            )}
+          </div>
+          <div style={{marginBottom:32}}>
+            <h3 style={{fontSize:14,fontWeight:800,color:"#D97706",margin:"0 0 10px"}}>Próximas 7 dias ({proximas.length})</h3>
+            {proximas.length===0?<p style={{fontSize:13,color:"#9CA3AF"}}>Nenhuma aferição nos próximos 7 dias.</p>:(
+              <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                {proximas.map(f=><RelatorioLinha key={f.id} codigo={f.codigo} nome={nomeLimpo(f.catalogo?.nome,f.codigo)} filialNome={f.filial?.nome} data={f.data_proxima_afericao}/>)}
+              </div>
+            )}
+          </div>
+
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
+            <p style={{fontSize:13,fontWeight:800,color:"#111827",margin:0}}>Licenças</p>
+            <BtnSecondary onClick={exportarLicencas}><FileSpreadsheet size={14}/>Exportar Excel</BtnSecondary>
+          </div>
+          <div style={{marginBottom:24}}>
+            <h3 style={{fontSize:14,fontWeight:800,color:"#B91C1C",margin:"0 0 10px"}}>Vencidas ({licencasVencidas.length})</h3>
+            {licencasVencidas.length===0?<p style={{fontSize:13,color:"#9CA3AF"}}>Nenhuma licença vencida.</p>:(
+              <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                {licencasVencidas.map(l=><RelatorioLinha key={l.key} codigo={l.codigo} nome={l.nome} filialNome={l.filialNome} data={l.data}/>)}
               </div>
             )}
           </div>
           <div>
-            <h3 style={{fontSize:14,fontWeight:800,color:"#D97706",margin:"0 0 10px"}}>Próximas 7 dias ({proximas.length})</h3>
-            {proximas.length===0?<p style={{fontSize:13,color:"#9CA3AF"}}>Nenhuma aferição nos próximos 7 dias.</p>:(
+            <h3 style={{fontSize:14,fontWeight:800,color:"#D97706",margin:"0 0 10px"}}>Próximas 7 dias ({licencasProximas.length})</h3>
+            {licencasProximas.length===0?<p style={{fontSize:13,color:"#9CA3AF"}}>Nenhuma licença vencendo nos próximos 7 dias.</p>:(
               <div style={{display:"flex",flexDirection:"column",gap:8}}>
-                {proximas.map(f=><RelatorioLinha key={f.id} f={f}/>)}
+                {licencasProximas.map(l=><RelatorioLinha key={l.key} codigo={l.codigo} nome={l.nome} filialNome={l.filialNome} data={l.data}/>)}
               </div>
             )}
           </div>
@@ -3262,16 +3391,16 @@ function RelatoriosView({profile,filiais}){
     </div>
   );
 }
-function RelatorioLinha({f}){
+function RelatorioLinha({codigo,nome,filialNome,data}){
   return(
     <div style={{background:"#fff",border:"1px solid #F1F5F9",borderRadius:12,padding:"11px 14px",
       display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,flexWrap:"wrap"}}>
       <div>
-        <span style={{fontSize:11,color:"#9CA3AF",fontWeight:700}}>{f.codigo}</span>{" "}
-        <span style={{fontSize:13.5,fontWeight:700,color:"#111827"}}>{nomeLimpo(f.catalogo?.nome,f.codigo)}</span>
-        <span style={{fontSize:12,color:"#6B7280"}}> · {f.filial?.nome}</span>
+        {codigo&&<><span style={{fontSize:11,color:"#9CA3AF",fontWeight:700}}>{codigo}</span>{" "}</>}
+        <span style={{fontSize:13.5,fontWeight:700,color:"#111827"}}>{nome}</span>
+        <span style={{fontSize:12,color:"#6B7280"}}> · {filialNome}</span>
       </div>
-      <div style={{fontSize:12.5,fontWeight:700,color:"#374151"}}>{fmtDate(f.data_proxima_afericao)}</div>
+      <div style={{fontSize:12.5,fontWeight:700,color:"#374151"}}>{fmtDate(data)}</div>
     </div>
   );
 }
