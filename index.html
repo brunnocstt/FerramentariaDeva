@@ -1716,6 +1716,54 @@ function TransferenciasPendentesPanel({profile,onChanged}){
   );
 }
 
+// Os 4 selects de filtro da tela Estoque — reaproveitado tanto na barra normal quanto
+// dentro do medidor invisível (nowrap) e do ModalFiltrosEstoque, sempre com a mesma marcação
+// pra medição de largura ficar fiel ao que de fato é renderizado.
+function FiltrosEstoqueCampos({filtroStatus,setFiltroStatus,filtroFilial,setFiltroFilial,mostrarFilial,filiaisOpcoes,
+  filtroCategoria,setFiltroCategoria,categorias,filtroObrigatoria,setFiltroObrigatoria,selectWidth="auto"}){
+  return(
+    <>
+      <Field label="Status">
+        <select value={filtroStatus} onChange={e=>setFiltroStatus(e.target.value)} style={{...inputStyle,width:selectWidth}}>
+          <option value="">Todos os status</option>
+          {Object.entries(STATUS_FERRAMENTA_INFO).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
+        </select>
+      </Field>
+      {mostrarFilial&&(
+        <Field label="Filial">
+          <select value={filtroFilial} onChange={e=>setFiltroFilial(e.target.value)} style={{...inputStyle,width:selectWidth}}>
+            <option value="">Todas as filiais</option>
+            {filiaisOpcoes.map(f=><option key={f.id} value={f.id}>{f.nome}</option>)}
+          </select>
+        </Field>
+      )}
+      <Field label="Categoria">
+        <select value={filtroCategoria} onChange={e=>setFiltroCategoria(e.target.value)} style={{...inputStyle,width:selectWidth}}>
+          <option value="">Todas as categorias</option>
+          {categorias.map(c=><option key={c.id} value={c.id}>{c.nome}</option>)}
+        </select>
+      </Field>
+      <Field label="Obrigatoriedade">
+        <select value={filtroObrigatoria} onChange={e=>setFiltroObrigatoria(e.target.value)} style={{...inputStyle,width:selectWidth}}>
+          <option value="">Todas</option>
+          <option value="sim">Só obrigatórias</option>
+          <option value="nao">Só não obrigatórias</option>
+        </select>
+      </Field>
+    </>
+  );
+}
+function ModalFiltrosEstoque({onClose,onLimpar,...campos}){
+  return(
+    <Modal title="Filtros" onClose={onClose} width={380}
+      footer={<><BtnSecondary onClick={onLimpar}>Limpar filtros</BtnSecondary><BtnPrimary onClick={onClose}>Aplicar</BtnPrimary></>}>
+      <div style={{display:"flex",flexDirection:"column",gap:14}}>
+        <FiltrosEstoqueCampos {...campos} selectWidth="100%"/>
+      </div>
+    </Modal>
+  );
+}
+
 function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCatalogos}){
   const isMobile=useIsMobile();
   const[unidades,setUnidades]=useState([]);
@@ -1733,7 +1781,32 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
   const[retiradaAberta,setRetiradaAberta]=useState(false);
   const[devolucaoAberta,setDevolucaoAberta]=useState(false);
   const[exportarAberto,setExportarAberto]=useState(false);
+  const[filtrosModalAberto,setFiltrosModalAberto]=useState(false);
+  const[filtrosCompacto,setFiltrosCompacto]=useState(false);
   const isAdmin=profile.userType==="admin_geral"||profile.userType==="admin_area";
+  const mostrarFiltroFilial=profile.userType==="admin_geral"||profile.filiaisAcesso.length>1;
+  const filiaisOpcoesFiltro=profile.userType==="admin_geral"?filiais:profile.filiaisAcesso;
+  const filtrosAtivos=[filtroStatus,filtroFilial,filtroCategoria,filtroObrigatoria].filter(Boolean).length;
+
+  // Mede se a barra de busca+filtros+exportar cabe numa linha só (em vez de chutar um
+  // breakpoint de largura) — um medidor invisível com nowrap fica sobreposto por cima,
+  // reportando a largura "natural" do conteúdo; se ela estourar a largura real disponível
+  // da barra, os filtros viram um botão único que abre modal. Reage a resize da janela e
+  // também da própria barra (ex.: recolher/expandir a sidebar), nos dois sentidos.
+  const barraFiltrosRef=useRef(null);
+  const medidorFiltrosRef=useRef(null);
+  useEffect(()=>{
+    if(isMobile){setFiltrosCompacto(false);return;}
+    function medir(){
+      if(!barraFiltrosRef.current||!medidorFiltrosRef.current)return;
+      setFiltrosCompacto(medidorFiltrosRef.current.scrollWidth>barraFiltrosRef.current.clientWidth);
+    }
+    medir();
+    const ro=new ResizeObserver(medir);
+    ro.observe(barraFiltrosRef.current);
+    window.addEventListener("resize",medir);
+    return()=>{ro.disconnect();window.removeEventListener("resize",medir);};
+  },[isMobile,mostrarFiltroFilial,categorias.length]);
 
   async function load(){
     setLoading(true);
@@ -1865,50 +1938,60 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
 
       <TransferenciasPendentesPanel profile={profile} onChanged={load}/>
 
-      <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:18,alignItems:"flex-end"}}>
-        <Field label="Buscar">
-          <div style={{position:"relative",minWidth:220}}>
-            <Search size={14} color="#9CA3AF" style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)"}}/>
-            <input value={busca} onChange={e=>setBusca(e.target.value)} placeholder="Código ou nome..."
-              style={{...inputStyle,paddingLeft:34}}/>
+      <div ref={barraFiltrosRef} style={{position:"relative",marginBottom:18}}>
+        {/* medidor invisível: mesma barra "cheia" (sem quebrar linha), só pra descobrir se caberia */}
+        {!isMobile&&(
+          <div ref={medidorFiltrosRef} aria-hidden="true" style={{position:"absolute",top:0,left:0,
+            visibility:"hidden",pointerEvents:"none",zIndex:-1,display:"flex",gap:10,flexWrap:"nowrap",alignItems:"flex-end"}}>
+            <Field label="Buscar"><div style={{width:220,height:1}}/></Field>
+            <FiltrosEstoqueCampos filtroStatus={filtroStatus} setFiltroStatus={setFiltroStatus}
+              filtroFilial={filtroFilial} setFiltroFilial={setFiltroFilial} mostrarFilial={mostrarFiltroFilial}
+              filiaisOpcoes={filiaisOpcoesFiltro} filtroCategoria={filtroCategoria} setFiltroCategoria={setFiltroCategoria}
+              categorias={categorias} filtroObrigatoria={filtroObrigatoria} setFiltroObrigatoria={setFiltroObrigatoria}/>
+            <div style={{display:"flex",gap:8}}>
+              <BtnSecondary><FileSpreadsheet size={14}/>Exportar Excel</BtnSecondary>
+              <BtnSecondary><FileText size={14}/>Exportar PDF</BtnSecondary>
+            </div>
           </div>
-        </Field>
-        <Field label="Status">
-          <select value={filtroStatus} onChange={e=>setFiltroStatus(e.target.value)} style={{...inputStyle,width:"auto"}}>
-            <option value="">Todos os status</option>
-            {Object.entries(STATUS_FERRAMENTA_INFO).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
-          </select>
-        </Field>
-        {(profile.userType==="admin_geral"||profile.filiaisAcesso.length>1)&&(
-          <Field label="Filial">
-            <select value={filtroFilial} onChange={e=>setFiltroFilial(e.target.value)} style={{...inputStyle,width:"auto"}}>
-              <option value="">Todas as filiais</option>
-              {(profile.userType==="admin_geral"?filiais:profile.filiaisAcesso).map(f=><option key={f.id} value={f.id}>{f.nome}</option>)}
-            </select>
+        )}
+        <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-end"}}>
+          <Field label="Buscar">
+            <div style={{position:"relative",minWidth:220}}>
+              <Search size={14} color="#9CA3AF" style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)"}}/>
+              <input value={busca} onChange={e=>setBusca(e.target.value)} placeholder="Código ou nome..."
+                style={{...inputStyle,paddingLeft:34}}/>
+            </div>
           </Field>
-        )}
-        <Field label="Categoria">
-          <select value={filtroCategoria} onChange={e=>setFiltroCategoria(e.target.value)} style={{...inputStyle,width:"auto"}}>
-            <option value="">Todas as categorias</option>
-            {categorias.map(c=><option key={c.id} value={c.id}>{c.nome}</option>)}
-          </select>
-        </Field>
-        <Field label="Obrigatoriedade">
-          <select value={filtroObrigatoria} onChange={e=>setFiltroObrigatoria(e.target.value)} style={{...inputStyle,width:"auto"}}>
-            <option value="">Todas</option>
-            <option value="sim">Só obrigatórias</option>
-            <option value="nao">Só não obrigatórias</option>
-          </select>
-        </Field>
-        {isMobile?(
-          <BtnSecondary onClick={()=>setExportarAberto(true)}><Download size={14}/>Exportar</BtnSecondary>
-        ):(
-          <div style={{display:"flex",gap:8,marginLeft:"auto"}}>
-            <BtnSecondary onClick={()=>exportarEstoque("excel")}><FileSpreadsheet size={14}/>Exportar Excel</BtnSecondary>
-            <BtnSecondary onClick={()=>exportarEstoque("pdf")}><FileText size={14}/>Exportar PDF</BtnSecondary>
-          </div>
-        )}
+          {filtrosCompacto?(
+            <BtnSecondary onClick={()=>setFiltrosModalAberto(true)}>
+              <Filter size={14}/>Filtros
+              {filtrosAtivos>0&&<span style={{marginLeft:2,fontSize:10.5,fontWeight:800,color:"#fff",background:BLUE,
+                borderRadius:99,padding:"1px 6px"}}>{filtrosAtivos}</span>}
+            </BtnSecondary>
+          ):(
+            <FiltrosEstoqueCampos filtroStatus={filtroStatus} setFiltroStatus={setFiltroStatus}
+              filtroFilial={filtroFilial} setFiltroFilial={setFiltroFilial} mostrarFilial={mostrarFiltroFilial}
+              filiaisOpcoes={filiaisOpcoesFiltro} filtroCategoria={filtroCategoria} setFiltroCategoria={setFiltroCategoria}
+              categorias={categorias} filtroObrigatoria={filtroObrigatoria} setFiltroObrigatoria={setFiltroObrigatoria}/>
+          )}
+          {isMobile?(
+            <BtnSecondary onClick={()=>setExportarAberto(true)}><Download size={14}/>Exportar</BtnSecondary>
+          ):(
+            <div style={{display:"flex",gap:8,marginLeft:"auto"}}>
+              <BtnSecondary onClick={()=>exportarEstoque("excel")}><FileSpreadsheet size={14}/>Exportar Excel</BtnSecondary>
+              <BtnSecondary onClick={()=>exportarEstoque("pdf")}><FileText size={14}/>Exportar PDF</BtnSecondary>
+            </div>
+          )}
+        </div>
       </div>
+      {filtrosModalAberto&&(
+        <ModalFiltrosEstoque onClose={()=>setFiltrosModalAberto(false)}
+          filtroStatus={filtroStatus} setFiltroStatus={setFiltroStatus}
+          filtroFilial={filtroFilial} setFiltroFilial={setFiltroFilial} mostrarFilial={mostrarFiltroFilial}
+          filiaisOpcoes={filiaisOpcoesFiltro} filtroCategoria={filtroCategoria} setFiltroCategoria={setFiltroCategoria}
+          categorias={categorias} filtroObrigatoria={filtroObrigatoria} setFiltroObrigatoria={setFiltroObrigatoria}
+          onLimpar={()=>{setFiltroStatus("");setFiltroFilial("");setFiltroCategoria("");setFiltroObrigatoria("");}}/>
+      )}
 
       {loading?<div style={{padding:60,textAlign:"center"}}><Spinner size={20}/></div>:
       totalItens===0?<EmptyState icon={Wrench} title="Nenhuma ferramenta encontrada" text="Ajuste os filtros ou cadastre uma nova ferramenta."/>:
