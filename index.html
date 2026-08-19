@@ -868,6 +868,7 @@ function UsoAoVivoPanel(){
 
 function DashboardView({profile,filiais}){
   const[stats,setStats]=useState(null);
+  const[atingimento,setAtingimento]=useState(null);
   const[loading,setLoading]=useState(true);
 
   useEffect(()=>{
@@ -877,9 +878,18 @@ function DashboardView({profile,filiais}){
       let q=supabase.from("ferramentas_unidade").select("status,data_proxima_afericao,ativo,data_validade_licenca,catalogo:catalogo_id(requer_licenca)");
       let qE=supabase.from("estoque_pool").select("id,quantidade_total,data_validade_licenca,catalogo:catalogo_id(requer_licenca)");
       let qEmp=supabase.from("emprestimos").select("estoque_id,quantidade").is("data_devolucao",null);
-      if(profile.userType!=="admin_geral"){q=q.in("filial_id",profile.filialIds);qE=qE.in("filial_id",profile.filialIds);}
-      const[{data,error},{data:dataE},{data:dataEmp}]=await Promise.all([q,qE,qEmp]);
+      const{data:catsObrig}=await supabase.from("ferramentas_catalogo").select("id").eq("obrigatoria",true);
+      const idsObrig=(catsObrig||[]).map(c=>c.id);
+      let qUnidObrig=supabase.from("ferramentas_unidade").select("filial_id,catalogo_id,status,ativo").eq("ativo",true).in("catalogo_id",idsObrig.length?idsObrig:["00000000-0000-0000-0000-000000000000"]);
+      let qPoolObrig=supabase.from("estoque_pool").select("id,filial_id,catalogo_id,quantidade_total").in("catalogo_id",idsObrig.length?idsObrig:["00000000-0000-0000-0000-000000000000"]);
+      if(profile.userType!=="admin_geral"){
+        q=q.in("filial_id",profile.filialIds);qE=qE.in("filial_id",profile.filialIds);
+        qUnidObrig=qUnidObrig.in("filial_id",profile.filialIds);qPoolObrig=qPoolObrig.in("filial_id",profile.filialIds);
+      }
+      const[{data,error},{data:dataE},{data:dataEmp},{data:unidObrig},{data:poolObrig}]=await Promise.all([q,qE,qEmp,qUnidObrig,qPoolObrig]);
       if(cancelled)return;
+      const empMap={};
+      (dataEmp||[]).forEach(e=>{empMap[e.estoque_id]=(empMap[e.estoque_id]||0)+e.quantidade;});
       if(!error&&data){
         const s={total:data.length,disponivel:0,com_colaborador:0,em_afericao:0,em_conserto:0,extraviada:0,baixada:0,
           vencidas:0,proximas:0,licencasVencidas:0,licencasProximas:0};
@@ -899,8 +909,6 @@ function DashboardView({profile,filiais}){
         });
         // Estoque por quantidade entra nos mesmos totais (senão "Total de Ferramentas"/
         // "Disponíveis"/"Com Colaborador" ficam menores que o real, divergindo da tela Estoque).
-        const empMap={};
-        (dataEmp||[]).forEach(e=>{empMap[e.estoque_id]=(empMap[e.estoque_id]||0)+e.quantidade;});
         (dataE||[]).forEach(e=>{
           const emprestada=empMap[e.id]||0;
           s.total+=e.quantidade_total;
@@ -914,6 +922,33 @@ function DashboardView({profile,filiais}){
         });
         setStats(s);
       }
+
+      // Atingimento de obrigatórias por filial: das ferramentas obrigatórias que a filial
+      // tem cadastradas (unidade individual OU estoque por quantidade), quantas estão
+      // disponíveis agora — não perdidas, não em conserto/aferição, não todas emprestadas.
+      const filiaisView=profile.userType==="admin_geral"?filiais:profile.filiaisAcesso;
+      const porFilial=new Map(); // filial_id -> Map(catalogo_id -> {disponivel})
+      (unidObrig||[]).forEach(u=>{
+        if(!porFilial.has(u.filial_id))porFilial.set(u.filial_id,new Map());
+        const mapa=porFilial.get(u.filial_id);
+        const atual=mapa.get(u.catalogo_id)||{disponivel:false};
+        if(u.status==="disponivel")atual.disponivel=true;
+        mapa.set(u.catalogo_id,atual);
+      });
+      (poolObrig||[]).forEach(p=>{
+        if(!porFilial.has(p.filial_id))porFilial.set(p.filial_id,new Map());
+        const mapa=porFilial.get(p.filial_id);
+        const atual=mapa.get(p.catalogo_id)||{disponivel:false};
+        if(p.quantidade_total-(empMap[p.id]||0)>0)atual.disponivel=true;
+        mapa.set(p.catalogo_id,atual);
+      });
+      const ating=filiaisView.map(f=>{
+        const mapa=porFilial.get(f.id);
+        const total=mapa?mapa.size:0;
+        const disponiveis=mapa?Array.from(mapa.values()).filter(v=>v.disponivel).length:0;
+        return{filialId:f.id,filialNome:f.nome,total,disponiveis,pct:total>0?Math.round(disponiveis/total*100):null};
+      });
+      if(!cancelled)setAtingimento(ating);
       setLoading(false);
     }
     load();
@@ -943,9 +978,33 @@ function DashboardView({profile,filiais}){
         <StatCard label="Aferições Próx. 7 dias" value={stats.proximas} Icon={Calendar} color="#D97706"/>
       </div>
       {(stats.licencasVencidas>0||stats.licencasProximas>0)&&(
-        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:14}}>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:14,marginBottom:14}}>
           <StatCard label="Licenças Vencidas" value={stats.licencasVencidas} Icon={AlertCircle} color="#B91C1C"/>
           <StatCard label="Licenças Próx. 7 dias" value={stats.licencasProximas} Icon={Calendar} color="#D97706"/>
+        </div>
+      )}
+      {atingimento&&atingimento.length>0&&(
+        <div style={{background:"#fff",border:"1px solid #F1F5F9",borderRadius:14,padding:"18px 20px",marginBottom:14}}>
+          <h2 style={{fontSize:15,fontWeight:800,color:"#111827",margin:"0 0 3px"}}>Atingimento de Ferramentas Obrigatórias</h2>
+          <p style={{fontSize:11.5,color:"#9CA3AF",margin:"0 0 14px"}}>
+            Das ferramentas obrigatórias já cadastradas em cada filial, quantas estão disponíveis agora.
+          </p>
+          <div style={{display:"flex",flexDirection:"column",gap:12}}>
+            {atingimento.map(a=>{
+              const cor=a.pct===null?"#9CA3AF":a.pct>=90?"#059669":a.pct>=70?"#D97706":"#B91C1C";
+              return(
+                <div key={a.filialId} style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+                  <div style={{width:130,fontSize:13,fontWeight:700,color:"#374151",flexShrink:0}}>{a.filialNome}</div>
+                  <div style={{flex:1,minWidth:120,height:8,borderRadius:99,background:"#F1F5F9",overflow:"hidden"}}>
+                    <div style={{width:`${a.pct||0}%`,height:"100%",background:cor,borderRadius:99,transition:"width .3s"}}/>
+                  </div>
+                  <div style={{minWidth:130,textAlign:"right",fontSize:12.5,fontWeight:700,color:cor,flexShrink:0}}>
+                    {a.pct===null?"Nenhuma cadastrada":`${a.disponiveis}/${a.total} · ${a.pct}%`}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
       {profile.userType!=="colaborador"&&<UsoAoVivoPanel/>}
