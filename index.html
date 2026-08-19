@@ -869,6 +869,7 @@ function UsoAoVivoPanel(){
 function DashboardView({profile,filiais}){
   const[stats,setStats]=useState(null);
   const[atingimento,setAtingimento]=useState(null);
+  const[checklistFaltando,setChecklistFaltando]=useState([]);
   const[loading,setLoading]=useState(true);
 
   useEffect(()=>{
@@ -878,10 +879,13 @@ function DashboardView({profile,filiais}){
       let q=supabase.from("ferramentas_unidade").select("status,data_proxima_afericao,ativo,data_validade_licenca,catalogo:catalogo_id(requer_licenca)");
       let qE=supabase.from("estoque_pool").select("id,quantidade_total,data_validade_licenca,catalogo:catalogo_id(requer_licenca)");
       let qEmp=supabase.from("emprestimos").select("estoque_id,quantidade").is("data_devolucao",null);
-      const{data:catsObrig}=await supabase.from("ferramentas_catalogo").select("id").eq("obrigatoria",true);
-      const idsObrig=(catsObrig||[]).map(c=>c.id);
-      let qUnidObrig=supabase.from("ferramentas_unidade").select("filial_id,catalogo_id,status,ativo").eq("ativo",true).in("catalogo_id",idsObrig.length?idsObrig:["00000000-0000-0000-0000-000000000000"]);
-      let qPoolObrig=supabase.from("estoque_pool").select("id,filial_id,catalogo_id,quantidade_total").in("catalogo_id",idsObrig.length?idsObrig:["00000000-0000-0000-0000-000000000000"]);
+      // Lista mestre da checklist oficial Especifer/Iveco (228 itens fixos) — o vínculo com o
+      // catálogo (catalogo_id) é mantido dinamicamente por trigger no banco: cadastrar uma
+      // ferramenta com o código certo já entra na contagem sozinho, sem reprocessar nada aqui.
+      const{data:checklist}=await supabase.from("checklist_especifer_itens").select("id,codigo,descricao,catalogo_id").order("ordem");
+      const idsChecklist=[...new Set((checklist||[]).filter(c=>c.catalogo_id).map(c=>c.catalogo_id))];
+      let qUnidObrig=supabase.from("ferramentas_unidade").select("filial_id,catalogo_id,status,ativo").eq("ativo",true).in("catalogo_id",idsChecklist.length?idsChecklist:["00000000-0000-0000-0000-000000000000"]);
+      let qPoolObrig=supabase.from("estoque_pool").select("id,filial_id,catalogo_id,quantidade_total").in("catalogo_id",idsChecklist.length?idsChecklist:["00000000-0000-0000-0000-000000000000"]);
       if(profile.userType!=="admin_geral"){
         q=q.in("filial_id",profile.filialIds);qE=qE.in("filial_id",profile.filialIds);
         qUnidObrig=qUnidObrig.in("filial_id",profile.filialIds);qPoolObrig=qPoolObrig.in("filial_id",profile.filialIds);
@@ -923,32 +927,32 @@ function DashboardView({profile,filiais}){
         setStats(s);
       }
 
-      // Atingimento de obrigatórias por filial: das ferramentas obrigatórias que a filial
-      // tem cadastradas (unidade individual OU estoque por quantidade), quantas estão
-      // disponíveis agora — não perdidas, não em conserto/aferição, não todas emprestadas.
+      // Atingimento por filial contra os 228 itens da checklist oficial (não só o que já foi
+      // cadastrado) — um item conta como "disponível" pra uma filial quando o catálogo vinculado
+      // tem pelo menos 1 unidade/pool disponível NAQUELA filial especificamente.
       const filiaisView=profile.userType==="admin_geral"?filiais:profile.filiaisAcesso;
-      const porFilial=new Map(); // filial_id -> Map(catalogo_id -> {disponivel})
+      const porFilial=new Map(); // filial_id -> Set(catalogo_id disponível)
       (unidObrig||[]).forEach(u=>{
-        if(!porFilial.has(u.filial_id))porFilial.set(u.filial_id,new Map());
-        const mapa=porFilial.get(u.filial_id);
-        const atual=mapa.get(u.catalogo_id)||{disponivel:false};
-        if(u.status==="disponivel")atual.disponivel=true;
-        mapa.set(u.catalogo_id,atual);
+        if(u.status!=="disponivel")return;
+        if(!porFilial.has(u.filial_id))porFilial.set(u.filial_id,new Set());
+        porFilial.get(u.filial_id).add(u.catalogo_id);
       });
       (poolObrig||[]).forEach(p=>{
-        if(!porFilial.has(p.filial_id))porFilial.set(p.filial_id,new Map());
-        const mapa=porFilial.get(p.filial_id);
-        const atual=mapa.get(p.catalogo_id)||{disponivel:false};
-        if(p.quantidade_total-(empMap[p.id]||0)>0)atual.disponivel=true;
-        mapa.set(p.catalogo_id,atual);
+        if(p.quantidade_total-(empMap[p.id]||0)<=0)return;
+        if(!porFilial.has(p.filial_id))porFilial.set(p.filial_id,new Set());
+        porFilial.get(p.filial_id).add(p.catalogo_id);
       });
+      const totalChecklist=(checklist||[]).length;
       const ating=filiaisView.map(f=>{
-        const mapa=porFilial.get(f.id);
-        const total=mapa?mapa.size:0;
-        const disponiveis=mapa?Array.from(mapa.values()).filter(v=>v.disponivel).length:0;
-        return{filialId:f.id,filialNome:f.nome,total,disponiveis,pct:total>0?Math.round(disponiveis/total*100):null};
+        const disponiveisSet=porFilial.get(f.id)||new Set();
+        const disponiveis=(checklist||[]).filter(c=>c.catalogo_id&&disponiveisSet.has(c.catalogo_id)).length;
+        return{filialId:f.id,filialNome:f.nome,total:totalChecklist,disponiveis,
+          pct:totalChecklist>0?Math.round(disponiveis/totalChecklist*100):null};
       });
-      if(!cancelled)setAtingimento(ating);
+      if(!cancelled){
+        setAtingimento(ating);
+        setChecklistFaltando((checklist||[]).filter(c=>!c.catalogo_id));
+      }
       setLoading(false);
     }
     load();
@@ -987,7 +991,7 @@ function DashboardView({profile,filiais}){
         <div style={{background:"#fff",border:"1px solid #F1F5F9",borderRadius:14,padding:"18px 20px",marginBottom:14}}>
           <h2 style={{fontSize:15,fontWeight:800,color:"#111827",margin:"0 0 3px"}}>Atingimento de Ferramentas Obrigatórias</h2>
           <p style={{fontSize:11.5,color:"#9CA3AF",margin:"0 0 14px"}}>
-            Das ferramentas obrigatórias já cadastradas em cada filial, quantas estão disponíveis agora.
+            Contra os 228 itens da checklist oficial Especifer/Iveco: quantos a filial tem disponível agora.
           </p>
           <div style={{display:"flex",flexDirection:"column",gap:12}}>
             {atingimento.map(a=>{
@@ -999,11 +1003,30 @@ function DashboardView({profile,filiais}){
                     <div style={{width:`${a.pct||0}%`,height:"100%",background:cor,borderRadius:99,transition:"width .3s"}}/>
                   </div>
                   <div style={{minWidth:130,textAlign:"right",fontSize:12.5,fontWeight:700,color:cor,flexShrink:0}}>
-                    {a.pct===null?"Nenhuma cadastrada":`${a.disponiveis}/${a.total} · ${a.pct}%`}
+                    {a.disponiveis}/{a.total} · {a.pct}%
                   </div>
                 </div>
               );
             })}
+          </div>
+        </div>
+      )}
+      {profile.userType!=="colaborador"&&checklistFaltando.length>0&&(
+        <div style={{background:"#fff",border:"1px solid #F1F5F9",borderRadius:14,padding:"18px 20px",marginBottom:14}}>
+          <h2 style={{fontSize:15,fontWeight:800,color:"#111827",margin:"0 0 3px"}}>
+            Itens da checklist ainda não cadastrados ({checklistFaltando.length})
+          </h2>
+          <p style={{fontSize:11.5,color:"#9CA3AF",margin:"0 0 14px"}}>
+            Nenhuma filial tem essas ferramentas no sistema — assim que forem cadastradas com o
+            código correto, entram na contagem automaticamente.
+          </p>
+          <div style={{display:"flex",flexDirection:"column",gap:6}}>
+            {checklistFaltando.map(c=>(
+              <div key={c.id} style={{display:"flex",gap:10,alignItems:"baseline",padding:"6px 0",borderTop:"1px solid #F8FAFC"}}>
+                <span style={{fontSize:11,fontWeight:700,color:"#9CA3AF",minWidth:80,flexShrink:0}}>{c.codigo}</span>
+                <span style={{fontSize:12.5,color:"#374151"}}>{c.descricao}</span>
+              </div>
+            ))}
           </div>
         </div>
       )}
