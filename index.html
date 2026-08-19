@@ -875,9 +875,10 @@ function DashboardView({profile,filiais}){
     async function load(){
       setLoading(true);
       let q=supabase.from("ferramentas_unidade").select("status,data_proxima_afericao,ativo,data_validade_licenca,catalogo:catalogo_id(requer_licenca)");
-      let qE=supabase.from("estoque_pool").select("data_validade_licenca,catalogo:catalogo_id(requer_licenca)");
+      let qE=supabase.from("estoque_pool").select("id,quantidade_total,data_validade_licenca,catalogo:catalogo_id(requer_licenca)");
+      let qEmp=supabase.from("emprestimos").select("estoque_id,quantidade").is("data_devolucao",null);
       if(profile.userType!=="admin_geral"){q=q.in("filial_id",profile.filialIds);qE=qE.in("filial_id",profile.filialIds);}
-      const[{data,error},{data:dataE}]=await Promise.all([q,qE]);
+      const[{data,error},{data:dataE},{data:dataEmp}]=await Promise.all([q,qE,qEmp]);
       if(cancelled)return;
       if(!error&&data){
         const s={total:data.length,disponivel:0,com_colaborador:0,em_afericao:0,em_conserto:0,extraviada:0,baixada:0,
@@ -896,7 +897,15 @@ function DashboardView({profile,filiais}){
             else if(diasEntre(hoje,d)<=7)s.licencasProximas++;
           }
         });
+        // Estoque por quantidade entra nos mesmos totais (senão "Total de Ferramentas"/
+        // "Disponíveis"/"Com Colaborador" ficam menores que o real, divergindo da tela Estoque).
+        const empMap={};
+        (dataEmp||[]).forEach(e=>{empMap[e.estoque_id]=(empMap[e.estoque_id]||0)+e.quantidade;});
         (dataE||[]).forEach(e=>{
+          const emprestada=empMap[e.id]||0;
+          s.total+=e.quantidade_total;
+          s.disponivel+=Math.max(0,e.quantidade_total-emprestada);
+          s.com_colaborador+=emprestada;
           if(e.catalogo?.requer_licenca&&e.data_validade_licenca){
             const d=new Date(e.data_validade_licenca);
             if(d<hoje)s.licencasVencidas++;
