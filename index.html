@@ -1952,7 +1952,9 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
     return pessoas.filter(p=>p.filial_id===fid);
   },[pessoas,selecionada,grupoSelecionado]);
 
-  const totalItens=unidadesFiltradas.length+estoquesFiltrados.length;
+  // totalItens conta unidades físicas de verdade — pool soma quantidade_total, não nº de linhas
+  // (uma linha de pool pode representar várias unidades, ex.: "Suporte Câmbio" qtd=4).
+  const totalItens=unidadesFiltradas.length+estoquesFiltrados.reduce((s,e)=>s+e.quantidade_total,0);
   const totalLinhas=gruposUnidades.length+estoquesFiltrados.length;
 
   function abrirGrupo(grupo){
