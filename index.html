@@ -2284,9 +2284,9 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
         onSelectUnidade={u=>{setGrupoSelecionado(null);setSelecionada(u);}}/>}
       {novaAberta&&<ModalNovaFerramenta filiais={filiais} categorias={categorias} catalogos={catalogos} profile={profile}
         onClose={()=>setNovaAberta(false)} onSaved={()=>{setNovaAberta(false);reloadCatalogos&&reloadCatalogos();load();}}/>}
-      {retiradaAberta&&<ModalNovaRetirada filiais={filiais}
+      {retiradaAberta&&<ModalNovaRetirada filiais={filiais} profile={profile}
         onClose={()=>setRetiradaAberta(false)} onFeito={load}/>}
-      {devolucaoAberta&&<ModalDevolucao filiais={filiais}
+      {devolucaoAberta&&<ModalDevolucao filiais={filiais} profile={profile}
         onClose={()=>setDevolucaoAberta(false)} onFeito={load}/>}
       {exportarAberto&&<ModalExportar onClose={()=>setExportarAberto(false)}
         onEscolher={formato=>{exportarEstoque(formato);setExportarAberto(false);}}/>}
@@ -2330,6 +2330,90 @@ async function buscarColaboradorPorCracha(bruto,filiais){
   return{colaborador:data};
 }
 
+// Enquanto o leitor de código de barras não chega: seletor manual por filial + busca de
+// nome/matrícula, como alternativa à leitura de crachá. As duas abas produzem o mesmo formato
+// de colaborador ({id,name,filial_id,matricula}), então o resto do fluxo (retirada/devolução)
+// nem sabe qual delas foi usada.
+function SeletorColaborador({filiais,profile,onEncontrado}){
+  const[modo,setModo]=useState("manual");
+  const tabStyle=ativo=>({flex:1,padding:"9px 14px",borderRadius:8,border:"none",cursor:"pointer",
+    fontSize:12.5,fontWeight:700,background:ativo?"#fff":"transparent",color:ativo?BLUE:"#6B7280",
+    boxShadow:ativo?"0 1px 3px rgba(0,0,0,.08)":"none"});
+  return(
+    <div>
+      <div style={{display:"flex",gap:4,marginBottom:16,padding:4,background:"#F3F4F6",borderRadius:11}}>
+        <button type="button" onClick={()=>setModo("manual")} style={tabStyle(modo==="manual")}>Buscar Filial / Nome</button>
+        <button type="button" onClick={()=>setModo("cracha")} style={tabStyle(modo==="cracha")}>Ler Crachá</button>
+      </div>
+      {modo==="manual"
+        ?<BuscaManualColaborador filiais={filiais} profile={profile} onEncontrado={onEncontrado}/>
+        :<CampoBuscaCracha filiais={filiais} onEncontrado={onEncontrado}/>}
+    </div>
+  );
+}
+function BuscaManualColaborador({filiais,profile,onEncontrado}){
+  const filiaisPermitidas=profile.userType==="admin_geral"?filiais:profile.filiaisAcesso;
+  const[filialId,setFilialId]=useState(filiaisPermitidas.length===1?filiaisPermitidas[0].id:"");
+  const[busca,setBusca]=useState("");
+  const[lista,setLista]=useState([]);
+  const[loading,setLoading]=useState(false);
+  const[erro,setErro]=useState("");
+
+  useEffect(()=>{
+    if(!filialId){setLista([]);return;}
+    setLoading(true);setErro("");
+    supabase.from("profiles").select("id,name,filial_id,matricula")
+      .eq("filial_id",filialId).eq("is_active",true).order("name")
+      .then(({data,error})=>{
+        setLoading(false);
+        if(error){setErro("Não foi possível carregar os colaboradores dessa filial.");return;}
+        setLista(data||[]);
+      });
+  },[filialId]);
+
+  const t=busca.trim().toLowerCase();
+  const filtrada=lista.filter(c=>!t||c.name.toLowerCase().includes(t)||(c.matricula||"").toLowerCase().includes(t));
+
+  return(
+    <div style={{display:"flex",flexDirection:"column",gap:14}}>
+      <ErrorBox>{erro}</ErrorBox>
+      <Field label="Filial" required>
+        <select value={filialId} onChange={e=>setFilialId(e.target.value)} style={inputStyle}>
+          <option value="">Selecione a filial...</option>
+          {filiaisPermitidas.map(f=><option key={f.id} value={f.id}>{f.nome}</option>)}
+        </select>
+      </Field>
+      {filialId&&(
+        <Field label="Buscar por nome ou matrícula">
+          <div style={{position:"relative"}}>
+            <Search size={14} color="#9CA3AF" style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)"}}/>
+            <input value={busca} onChange={e=>setBusca(e.target.value)} placeholder="Digite o nome ou a matrícula..."
+              style={{...inputStyle,paddingLeft:34}} autoFocus/>
+          </div>
+        </Field>
+      )}
+      {loading?<div style={{padding:30,textAlign:"center"}}><Spinner size={18}/></div>:
+      filialId&&filtrada.length===0?<EmptyState icon={Users} title="Nenhum colaborador encontrado" text="Ajuste a busca ou confira o cadastro em Gestão de Usuários."/>:
+      filialId&&(
+        <div style={{display:"flex",flexDirection:"column",gap:6,maxHeight:340,overflowY:"auto"}}>
+          {filtrada.map(c=>(
+            <button key={c.id} type="button" onClick={()=>onEncontrado(c)} className="lift"
+              style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderRadius:10,
+                border:"1px solid #F1F5F9",background:"#fff",cursor:"pointer",textAlign:"left"}}>
+              <div style={{width:32,height:32,borderRadius:"50%",background:BLUE,color:"#fff",display:"flex",
+                alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:11.5,flexShrink:0}}>{getInitials(c.name)}</div>
+              <div style={{minWidth:0,flex:1}}>
+                <div style={{fontSize:13.5,fontWeight:700,color:"#111827"}}>{c.name}</div>
+                <div style={{fontSize:11.5,color:"#9CA3AF"}}>{c.matricula?`Matrícula ${c.matricula}`:"Sem matrícula"}</div>
+              </div>
+              <ChevronRight size={16} color="#9CA3AF"/>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 function CampoBuscaCracha({filiais,onEncontrado}){
   const[matricula,setMatricula]=useState("");
   const[buscando,setBuscando]=useState(false);
@@ -2359,23 +2443,23 @@ function CampoBuscaCracha({filiais,onEncontrado}){
   );
 }
 
-function ModalNovaRetirada({filiais,onClose,onFeito}){
+function ModalNovaRetirada({filiais,profile,onClose,onFeito}){
   const[colaborador,setColaborador]=useState(null);
   return(
     <Modal title="Nova Retirada" onClose={onClose} width={640}>
       {!colaborador
-        ?<CampoBuscaCracha filiais={filiais} onEncontrado={setColaborador}/>
+        ?<SeletorColaborador filiais={filiais} profile={profile} onEncontrado={setColaborador}/>
         :<RetiradaColaborador colaborador={colaborador} onVoltar={()=>setColaborador(null)} onFeito={onFeito}/>}
     </Modal>
   );
 }
 
-function ModalDevolucao({filiais,onClose,onFeito}){
+function ModalDevolucao({filiais,profile,onClose,onFeito}){
   const[colaborador,setColaborador]=useState(null);
   return(
     <Modal title="Devolver Ferramenta" onClose={onClose} width={640}>
       {!colaborador
-        ?<CampoBuscaCracha filiais={filiais} onEncontrado={setColaborador}/>
+        ?<SeletorColaborador filiais={filiais} profile={profile} onEncontrado={setColaborador}/>
         :<DevolucaoColaborador colaborador={colaborador} onVoltar={()=>setColaborador(null)} onFeito={onFeito}/>}
     </Modal>
   );
