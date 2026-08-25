@@ -3326,7 +3326,19 @@ const pillSelectStyle={
   WebkitAppearance:"none",MozAppearance:"none",flexShrink:0,
 };
 
+// Contas criadas só pra rastreamento de matrícula (mecânicos do import em massa) usam um
+// domínio inventado e nunca têm senha real nem fazem login — "redefinir senha" não significa
+// nada pra elas, então o botão fica desabilitado.
+const EMAIL_SEM_ACESSO_SUFFIX="@ferramentaria.interno";
+function semAcessoReal(u){ return !!u.email?.toLowerCase().endsWith(EMAIL_SEM_ACESSO_SUFFIX); }
+function btnAcaoStyle(disabled){
+  return{border:"1px solid #E2E8F0",background:disabled?"#F8FAFC":"#fff",borderRadius:7,padding:"5px 8px",
+    display:"flex",alignItems:"center",color:disabled?"#CBD5E1":"#64748B",
+    cursor:disabled?"not-allowed":"pointer",opacity:disabled?.7:1};
+}
+
 function GestaoUsuariosView({profile,filiais}){
+  const isMobile=useIsMobile();
   const[lista,setLista]=useState([]);
   const[acessosExtras,setAcessosExtras]=useState({});
   const[loading,setLoading]=useState(true);
@@ -3336,6 +3348,7 @@ function GestaoUsuariosView({profile,filiais}){
   const[erroAcao,setErroAcao]=useState("");
   const[busca,setBusca]=useState("");
   const[filtroPerfil,setFiltroPerfil]=useState("");
+  const[abaStatus,setAbaStatus]=useState("ativos"); // "ativos" | "inativos" — menus separados, não misturados na mesma lista
 
   async function load(){
     setLoading(true);
@@ -3366,6 +3379,7 @@ function GestaoUsuariosView({profile,filiais}){
   }
 
   async function resetSenha(u){
+    if(semAcessoReal(u))return; // reforço: nunca dispara pra conta sem acesso real, mesmo se algo chamar isso fora do botão
     setErroAcao("");
     const{data:sess}=await supabase.auth.getSession();
     const resp=await fetch(`${SUPA_URL}/functions/v1/admin-update-user`,{
@@ -3387,12 +3401,33 @@ function GestaoUsuariosView({profile,filiais}){
   },[lista,busca,filtroPerfil]);
   const ativos=listaFiltrada.filter(u=>u.is_active);
   const inativos=listaFiltrada.filter(u=>!u.is_active);
-  const COLS=6;
+  // Se a aba "Inativos" ficar vazia (ex.: reativou o último), volta pra Ativos sozinho.
+  useEffect(()=>{ if(abaStatus==="inativos"&&inativos.length===0)setAbaStatus("ativos"); },[inativos.length]);
+  const listaExibida=abaStatus==="inativos"?inativos:ativos;
+
+  function AcoesUsuario({u}){
+    const semAcesso=semAcessoReal(u);
+    return(
+      <div style={{display:"flex",gap:6,alignItems:"center"}}>
+        <button title="Editar" onClick={()=>setEditando(u)} style={btnAcaoStyle(false)}>
+          <Pencil size={13}/>
+        </button>
+        <button title={semAcesso?"Sem acesso ativo à plataforma — não tem senha pra redefinir":"Redefinir senha"}
+          onClick={semAcesso?undefined:()=>resetSenha(u)} disabled={semAcesso} style={btnAcaoStyle(semAcesso)}>
+          <RefreshCw size={13}/>
+        </button>
+        <button title={u.is_active?"Desativar":"Ativar"} onClick={()=>toggleAtivo(u)}
+          style={{...btnAcaoStyle(false),color:u.is_active?"#EF4444":"#059669"}}>
+          <Power size={13}/>
+        </button>
+      </div>
+    );
+  }
 
   function LinhaUsuario({u}){
     const perfil=PERFIL_INFO[u.user_type]||PERFIL_INFO.colaborador;
     return(
-      <tr className="row-hover" style={{borderTop:"1px solid #F1F5F9",opacity:u.is_active?1:.55}}>
+      <tr className="row-hover" style={{borderTop:"1px solid #F1F5F9"}}>
         <td style={{padding:"13px 16px"}}>
           <div style={{display:"flex",alignItems:"center",gap:10}}>
             <div style={{width:32,height:32,borderRadius:"50%",background:u.color||BLUE,color:"#fff",
@@ -3401,9 +3436,7 @@ function GestaoUsuariosView({profile,filiais}){
               {getInitials(u.name)}
             </div>
             <div>
-              <div style={{fontSize:13,fontWeight:700,color:"#0F172A"}}>
-                {u.name}{!u.is_active&&<span style={{color:"#B91C1C",fontSize:11,fontWeight:700}}> (inativo)</span>}
-              </div>
+              <div style={{fontSize:13,fontWeight:700,color:"#0F172A"}}>{u.name}</div>
               <div style={{fontSize:11,color:"#94A3B8",marginTop:1}}>{u.email}</div>
             </div>
           </div>
@@ -3417,12 +3450,6 @@ function GestaoUsuariosView({profile,filiais}){
         <td style={{padding:"13px 16px",fontSize:12,color:u.matricula?"#374151":"#CBD5E1",fontWeight:500}}>
           {u.matricula||"—"}
         </td>
-        <td style={{padding:"13px 16px"}}>
-          <span style={{display:"inline-flex",alignItems:"center",gap:4,fontSize:11,fontWeight:700,
-            color:u.gerente_pos_vendas?"#1D4ED8":"#CBD5E1"}}>
-            {u.gerente_pos_vendas?<ToggleRight size={18} color="#1D4ED8"/>:<ToggleLeft size={18} color="#CBD5E1"/>} {u.gerente_pos_vendas?"Sim":"Não"}
-          </span>
-        </td>
         <td style={{padding:"13px 16px",maxWidth:200}}>
           <span style={{fontSize:12,color:"#64748B",fontWeight:500}}>{u.filial?.nome||"Todas as filiais"}</span>
           {acessosExtras[u.id]?.length>0&&(
@@ -3432,35 +3459,56 @@ function GestaoUsuariosView({profile,filiais}){
           )}
         </td>
         <td style={{padding:"13px 16px"}}>
-          {u.is_active?(
-            <span style={{display:"inline-flex",alignItems:"center",gap:5,padding:"3px 10px",borderRadius:99,
-              fontSize:11,fontWeight:700,background:"#ECFDF5",color:"#059669"}}>
-              <span style={{width:6,height:6,borderRadius:"50%",background:"#059669"}}/>Ativo
+          {u.gerente_pos_vendas?(
+            <span style={{display:"inline-flex",alignItems:"center",gap:4,padding:"3px 10px",borderRadius:99,
+              fontSize:11,fontWeight:700,background:"#EFF6FF",color:"#1D4ED8",whiteSpace:"nowrap"}}>
+              <ToggleRight size={13}/>Pós-Vendas
             </span>
-          ):(
-            <span style={{display:"inline-flex",alignItems:"center",gap:5,padding:"3px 10px",borderRadius:99,
-              fontSize:11,fontWeight:700,background:"#FEF2F2",color:"#B91C1C"}}>
-              <span style={{width:6,height:6,borderRadius:"50%",background:"#B91C1C"}}/>Inativo
-            </span>
-          )}
+          ):<span style={{fontSize:12,color:"#CBD5E1"}}>—</span>}
         </td>
-        <td style={{padding:"13px 16px"}}>
-          <div style={{display:"flex",gap:6,alignItems:"center"}}>
-            <button title="Editar" onClick={()=>setEditando(u)} style={{border:"1px solid #E2E8F0",background:"#fff",
-              borderRadius:7,padding:"5px 8px",cursor:"pointer",display:"flex",alignItems:"center",color:"#64748B"}}>
-              <Pencil size={13}/>
-            </button>
-            <button title="Redefinir senha" onClick={()=>resetSenha(u)} style={{border:"1px solid #E2E8F0",background:"#fff",
-              borderRadius:7,padding:"5px 8px",cursor:"pointer",display:"flex",alignItems:"center",color:"#64748B"}}>
-              <Lock size={13}/>
-            </button>
-            <button title={u.is_active?"Desativar":"Ativar"} onClick={()=>toggleAtivo(u)} style={{border:"1px solid #E2E8F0",background:"#fff",
-              borderRadius:7,padding:"5px 8px",cursor:"pointer",display:"flex",alignItems:"center",color:u.is_active?"#EF4444":"#059669"}}>
-              <Power size={13}/>
-            </button>
-          </div>
-        </td>
+        <td style={{padding:"13px 16px"}}><AcoesUsuario u={u}/></td>
       </tr>
+    );
+  }
+
+  function CardUsuario({u}){
+    const perfil=PERFIL_INFO[u.user_type]||PERFIL_INFO.colaborador;
+    return(
+      <div className="lift" style={{background:"#fff",border:"1px solid #F1F5F9",borderRadius:14,padding:14}}>
+        <div onClick={()=>setEditando(u)} style={{cursor:"pointer"}}>
+          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
+            <div style={{width:36,height:36,borderRadius:"50%",background:u.color||BLUE,color:"#fff",
+              display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:12.5,
+              flexShrink:0,letterSpacing:"-.5px"}}>
+              {getInitials(u.name)}
+            </div>
+            <div style={{minWidth:0,flex:1}}>
+              <div style={{fontSize:14,fontWeight:700,color:"#0F172A",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{u.name}</div>
+              <div style={{fontSize:11.5,color:"#94A3B8",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{u.email}</div>
+            </div>
+            <span style={{display:"inline-flex",alignItems:"center",gap:5,padding:"3px 9px",borderRadius:99,
+              fontSize:10,fontWeight:700,background:perfil.bg,color:perfil.color,whiteSpace:"nowrap",flexShrink:0}}>
+              <perfil.Icon size={10.5}/>{perfil.label}
+            </span>
+          </div>
+          <div style={{display:"flex",flexWrap:"wrap",rowGap:6,columnGap:16,fontSize:12,color:"#64748B"}}>
+            <span><strong style={{color:"#374151"}}>Matrícula:</strong> {u.matricula||"—"}</span>
+            <span><strong style={{color:"#374151"}}>Filial:</strong> {u.filial?.nome||"Todas"}</span>
+          </div>
+          {acessosExtras[u.id]?.length>0&&(
+            <div style={{fontSize:11,color:BLUE,fontWeight:700,marginTop:4}}>+ acesso extra: {acessosExtras[u.id].join(", ")}</div>
+          )}
+          {u.gerente_pos_vendas&&(
+            <div style={{display:"inline-flex",alignItems:"center",gap:4,marginTop:8,padding:"3px 10px",borderRadius:99,
+              fontSize:11,fontWeight:700,background:"#EFF6FF",color:"#1D4ED8"}}>
+              <ToggleRight size={13}/>Gerente de Pós-Vendas
+            </div>
+          )}
+        </div>
+        <div style={{display:"flex",gap:6,marginTop:12,paddingTop:12,borderTop:"1px solid #F8FAFC"}} onClick={e=>e.stopPropagation()}>
+          <AcoesUsuario u={u}/>
+        </div>
+      </div>
     );
   }
 
@@ -3490,10 +3538,32 @@ function GestaoUsuariosView({profile,filiais}){
         <BtnPrimary onClick={()=>setNovoAberto(true)}><UserPlus size={15}/>Novo Usuário</BtnPrimary>
       </div>
 
+      {/* Menus separados — a lista principal só mostra ativos; inativos só aparecem se você
+          entrar nessa aba de propósito, nunca misturados. */}
+      <div style={{display:"flex",gap:8,marginBottom:14}}>
+        <button onClick={()=>setAbaStatus("ativos")} style={{padding:"7px 14px",borderRadius:9,cursor:"pointer",
+          fontSize:12.5,fontWeight:700,border:`1.5px solid ${abaStatus==="ativos"?BLUE:"#E5E7EB"}`,
+          background:abaStatus==="ativos"?`${BLUE}10`:"#fff",color:abaStatus==="ativos"?BLUE:"#6B7280"}}>
+          Ativos ({ativos.length})
+        </button>
+        {inativos.length>0&&(
+          <button onClick={()=>setAbaStatus("inativos")} style={{padding:"7px 14px",borderRadius:9,cursor:"pointer",
+            fontSize:12.5,fontWeight:700,border:`1.5px solid ${abaStatus==="inativos"?"#B91C1C":"#E5E7EB"}`,
+            background:abaStatus==="inativos"?"#FEF2F2":"#fff",color:abaStatus==="inativos"?"#B91C1C":"#6B7280"}}>
+            Inativos ({inativos.length})
+          </button>
+        )}
+      </div>
+
       {loading?<div style={{padding:60,textAlign:"center"}}><Spinner size={20}/></div>:
-        listaFiltrada.length===0?(
+        listaExibida.length===0?(
           <div style={{background:"#fff",borderRadius:14,border:"1px solid #F1F5F9"}}>
-            <EmptyState icon={Users} title="Nenhum usuário encontrado" text="Ajuste a busca ou os filtros."/>
+            <EmptyState icon={Users} title={abaStatus==="inativos"?"Nenhum usuário inativo":"Nenhum usuário ativo encontrado"}
+              text="Ajuste a busca ou os filtros."/>
+          </div>
+        ):isMobile?(
+          <div style={{display:"flex",flexDirection:"column",gap:10}}>
+            {listaExibida.map(u=><CardUsuario key={u.id} u={u}/>)}
           </div>
         ):(
         <div style={{background:"#fff",borderRadius:14,border:"1px solid #F1F5F9",overflow:"hidden"}}>
@@ -3501,28 +3571,22 @@ function GestaoUsuariosView({profile,filiais}){
             <table style={{width:"100%",borderCollapse:"collapse"}}>
               <thead>
                 <tr style={{background:"#F8FAFC"}}>
-                  {["Usuário","Perfil","Matrícula","Pós-Vendas","Filial","Status",""].map(h=>(
-                    <th key={h} style={{padding:"10px 16px",textAlign:"left",fontSize:10,fontWeight:700,
-                      color:"#94A3B8",whiteSpace:"nowrap",letterSpacing:".06em",textTransform:"uppercase"}}>{h}</th>
+                  {[["Usuário",""],["Perfil",""],["Matrícula",""],["Filial",""],
+                    ["Pós-Vendas","Autoriza a pessoa a aprovar transferência de ferramenta entre QUALQUER par de filiais, não só a que ela gerencia."],
+                    ["",""]].map(([h,hint])=>(
+                    <th key={h} title={hint||undefined} style={{padding:"10px 16px",textAlign:"left",fontSize:10,fontWeight:700,
+                      color:"#94A3B8",whiteSpace:"nowrap",letterSpacing:".06em",textTransform:"uppercase",
+                      cursor:hint?"help":"default"}}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {ativos.length>0&&<tr><td colSpan={COLS+1} style={{padding:"8px 16px",background:"#F8FAFC",
-                  fontSize:11,fontWeight:800,color:"#059669",textTransform:"uppercase",letterSpacing:".06em"}}>
-                  Ativos <span style={{color:"#94A3B8",fontWeight:600,textTransform:"none",letterSpacing:0}}>({ativos.length})</span>
-                </td></tr>}
-                {ativos.map(u=><LinhaUsuario key={u.id} u={u}/>)}
-                {inativos.length>0&&<tr><td colSpan={COLS+1} style={{padding:"8px 16px",background:"#F8FAFC",
-                  fontSize:11,fontWeight:800,color:"#B91C1C",textTransform:"uppercase",letterSpacing:".06em"}}>
-                  Inativos <span style={{color:"#94A3B8",fontWeight:600,textTransform:"none",letterSpacing:0}}>({inativos.length})</span>
-                </td></tr>}
-                {inativos.map(u=><LinhaUsuario key={u.id} u={u}/>)}
+                {listaExibida.map(u=><LinhaUsuario key={u.id} u={u}/>)}
               </tbody>
             </table>
           </div>
           <div style={{padding:"10px 16px",borderTop:"1px solid #F1F5F9",fontSize:12,color:"#94A3B8",fontWeight:500}}>
-            {listaFiltrada.length} de {lista.length} usuário(s)
+            {listaExibida.length} usuário(s)
           </div>
         </div>
       )}
