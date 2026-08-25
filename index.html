@@ -797,27 +797,33 @@ function Sidebar({currentUser,activeNav,setActiveNav,onLogout,onViewProfile,
    sino de notificações e avatar) fica no cabeçalho fixo montado pelo App().
    ══════════════════════════════════════════════════════════════ */
 function MobileBottomNav({items,activeNav,setActiveNav}){
+  // A folga de baixo (área do gesto do sistema) fica numa faixa própria, separada da fileira
+  // de botões — assim a centralização do ícone+texto dentro do botão nunca depende de como o
+  // Safari calcula padding num container flex (foi isso que descentralizou da primeira vez).
   return(
-    <nav style={{flexShrink:0,zIndex:40,display:"flex",background:"#fff",
-      borderTop:"1px solid #F1F5F9",boxShadow:"0 -2px 12px rgba(0,0,0,.05)",
-      // max(...) garante uma folga mínima mesmo se o navegador não reportar inset nenhum;
-      // o viewport-fit=cover no <head> é o que faz o env() de verdade vir preenchido no iPhone.
-      paddingBottom:"max(10px,env(safe-area-inset-bottom))"}}>
-      {items.map(({id,label,Icon})=>{
-        const active=activeNav===id;
-        return(
-          <button key={id} onClick={()=>setActiveNav(id)}
-            style={{flex:1,minWidth:0,height:66,border:"none",background:"transparent",
-              cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",
-              justifyContent:"center",gap:4,color:active?BLUE:"#94A3B8"}}>
-            <Icon size={21} color="currentColor"/>
-            <span style={{fontSize:10,fontWeight:700,whiteSpace:"nowrap",
-              overflow:"hidden",textOverflow:"ellipsis",maxWidth:"100%",padding:"0 2px"}}>
-              {label}
-            </span>
-          </button>
-        );
-      })}
+    <nav style={{flexShrink:0,zIndex:40,display:"flex",flexDirection:"column",background:"#fff",
+      borderTop:"1px solid #F1F5F9",boxShadow:"0 -2px 12px rgba(0,0,0,.05)"}}>
+      <div style={{display:"flex",height:64}}>
+        {items.map(({id,label,Icon})=>{
+          const active=activeNav===id;
+          return(
+            <button key={id} onClick={()=>setActiveNav(id)}
+              style={{flex:1,minWidth:0,height:"100%",margin:0,padding:0,border:"none",
+                background:"transparent",WebkitAppearance:"none",appearance:"none",
+                cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",
+                justifyContent:"center",gap:4,color:active?BLUE:"#94A3B8"}}>
+              <Icon size={21} color="currentColor"/>
+              <span style={{fontSize:10,fontWeight:700,whiteSpace:"nowrap",lineHeight:1,
+                overflow:"hidden",textOverflow:"ellipsis",maxWidth:"100%",padding:"0 2px"}}>
+                {label}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      {/* Folga mínima garantida mesmo sem inset nenhum; o viewport-fit=cover no <head> é o que
+          faz o env() de verdade vir preenchido em vez de 0. */}
+      <div style={{flexShrink:0,height:"max(10px,env(safe-area-inset-bottom))"}}/>
     </nav>
   );
 }
