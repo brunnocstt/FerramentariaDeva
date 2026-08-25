@@ -2936,6 +2936,24 @@ function LinhaTransferencia({t}){
     </div>
   );
 }
+// Linha de ranking — usada tanto na visão geral "Por Ferramenta" (ferramentas mais emprestadas)
+// quanto "Por Mecânico" (pessoas mais ativas), antes de escolher um item específico pra detalhar.
+function LinhaRanking({label,total,tempoMedioMs,abertas,onClick}){
+  return(
+    <button onClick={onClick}
+      style={{width:"100%",textAlign:"left",padding:"11px 14px",border:"none",borderBottom:"1px solid #F8FAFC",
+        background:"#fff",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",gap:10}}>
+      <div style={{minWidth:0}}>
+        <div style={{fontSize:13.5,fontWeight:700,color:"#111827",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{label}</div>
+        <div style={{fontSize:11.5,color:"#9CA3AF",marginTop:1}}>
+          {total} empréstimo{total===1?"":"s"} · média {tempoMedioMs?fmtDuracaoMs(tempoMedioMs):"—"}
+          {abertas>0?` · ${abertas} agora`:""}
+        </div>
+      </div>
+      <ChevronRight size={16} color="#9CA3AF" style={{flexShrink:0}}/>
+    </button>
+  );
+}
 
 // ── Aba "Por Ferramenta" — busca uma unidade (código/nome) ou um tipo em estoque por
 // quantidade, e mostra as sessões de empréstimo (pareadas do log de movimentações) mais o
@@ -2947,6 +2965,57 @@ function HistoricoPorFerramentaView({profile}){
   const[selecionado,setSelecionado]=useState(null);
   const[dados,setDados]=useState(null);
   const[carregando,setCarregando]=useState(false);
+  const[ranking,setRanking]=useState(null); // null=ainda não carregou; visão padrão antes de buscar
+  const[carregandoRanking,setCarregandoRanking]=useState(false);
+
+  // Ranking geral (todas as ferramentas que já tiveram algum empréstimo), pra não obrigar a
+  // pessoa a já saber o que procurar — mostra assim que a aba abre, sem precisar digitar nada.
+  async function carregarRanking(){
+    setCarregandoRanking(true);
+    const[{data:movs},{data:emp}]=await Promise.all([
+      supabase.from("movimentacoes")
+        .select("ferramenta_id,tipo,data,ferramenta:ferramenta_id(codigo,filial_id,catalogo:catalogo_id(nome))")
+        .in("tipo",["retirada","devolucao"]).order("data",{ascending:true}).limit(3000),
+      supabase.from("emprestimos")
+        .select("estoque_id,quantidade,data_retirada,data_devolucao,estoque:estoque_id(catalogo_id,filial_id,catalogo:catalogo_id(nome))")
+        .order("data_retirada",{ascending:true}).limit(3000),
+    ]);
+    const permiteFilial=fid=>profile.userType==="admin_geral"||profile.filialIds.includes(fid);
+    const gruposU={};
+    (movs||[]).forEach(m=>{
+      if(!m.ferramenta)return;
+      (gruposU[m.ferramenta_id]=gruposU[m.ferramenta_id]||{meta:m.ferramenta,sess:[]}).sess.push(m);
+    });
+    const linhas=[];
+    for(const fid in gruposU){
+      const{meta,sess}=gruposU[fid];
+      if(!permiteFilial(meta.filial_id))continue;
+      let aberta=null; const sessoes=[];
+      for(const m of sess){
+        if(m.tipo==="retirada")aberta={dataRetirada:m.data,dataDevolucao:null};
+        else if(m.tipo==="devolucao"&&aberta){aberta.dataDevolucao=m.data;sessoes.push(aberta);aberta=null;}
+      }
+      if(aberta)sessoes.push(aberta);
+      if(sessoes.length===0)continue;
+      const label=`${meta.codigo} — ${nomeLimpo(meta.catalogo?.nome,meta.codigo)}`;
+      linhas.push({item:{tipo:"unidade",id:fid,label},label,...calcularIndicadores(sessoes)});
+    }
+    const gruposP={};
+    (emp||[]).forEach(e=>{
+      if(!e.estoque||!permiteFilial(e.estoque.filial_id))return;
+      const cid=e.estoque.catalogo_id;
+      (gruposP[cid]=gruposP[cid]||{nome:e.estoque.catalogo?.nome,sess:[]})
+        .sess.push({dataRetirada:e.data_retirada,dataDevolucao:e.data_devolucao});
+    });
+    for(const cid in gruposP){
+      const{nome,sess}=gruposP[cid];
+      linhas.push({item:{tipo:"pool",id:cid,label:nome},label:nome,...calcularIndicadores(sess)});
+    }
+    linhas.sort((a,b)=>b.total-a.total);
+    setRanking(linhas);
+    setCarregandoRanking(false);
+  }
+  useEffect(()=>{carregarRanking();},[profile.filialIds.join(","),profile.userType]);
 
   useEffect(()=>{
     const termo=busca.trim();
@@ -3008,35 +3077,54 @@ function HistoricoPorFerramentaView({profile}){
     setCarregando(false);
   }
 
-  if(!selecionado)return(
-    <div style={{maxWidth:480}}>
-      <div style={{display:"flex",alignItems:"center",gap:8,border:"1.5px solid #E2E8F0",borderRadius:9,padding:"8px 12px",marginBottom:8}}>
+  if(!selecionado){
+    const buscaAtiva=busca.trim().length>=2;
+    return(
+    <div>
+      <div style={{maxWidth:480,display:"flex",alignItems:"center",gap:8,border:"1.5px solid #E2E8F0",
+        borderRadius:9,padding:"8px 12px",marginBottom:14}}>
         <Search size={14} color="#94A3B8"/>
         <input autoFocus placeholder="Buscar por código ou nome da ferramenta..." value={busca}
           onChange={e=>setBusca(e.target.value)}
           style={{border:"none",fontSize:13,color:"#374151",width:"100%",background:"transparent",outline:"none"}}/>
       </div>
-      {buscando&&<div style={{padding:20,textAlign:"center"}}><Spinner size={16}/></div>}
-      {!buscando&&busca.trim().length>=2&&resultados.length===0&&(
-        <div style={{fontSize:12.5,color:"#9CA3AF",padding:"8px 4px"}}>Nada encontrado.</div>
-      )}
-      {resultados.length>0&&(
-        <div style={{background:"#fff",border:"1px solid #F1F5F9",borderRadius:12,overflow:"hidden"}}>
-          {resultados.map(r=>(
-            <button key={r.tipo+r.id} onClick={()=>selecionar(r)}
-              style={{width:"100%",textAlign:"left",padding:"10px 14px",border:"none",borderBottom:"1px solid #F8FAFC",
-                background:"#fff",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
-              <span style={{fontSize:13,fontWeight:600,color:"#111827"}}>{r.label}</span>
-              <span style={{fontSize:10.5,fontWeight:700,color:r.tipo==="pool"?"#7C3AED":"#94A3B8",
-                background:r.tipo==="pool"?"#F5F3FF":"#F8FAFC",padding:"2px 8px",borderRadius:99,whiteSpace:"nowrap"}}>
-                {r.tipo==="pool"?"Estoque":r.sub||"Unidade"}
-              </span>
-            </button>
-          ))}
-        </div>
+      {buscaAtiva?(<>
+        {buscando&&<div style={{padding:20,textAlign:"center"}}><Spinner size={16}/></div>}
+        {!buscando&&resultados.length===0&&(
+          <div style={{fontSize:12.5,color:"#9CA3AF",padding:"8px 4px"}}>Nada encontrado.</div>
+        )}
+        {resultados.length>0&&(
+          <div style={{maxWidth:480,background:"#fff",border:"1px solid #F1F5F9",borderRadius:12,overflow:"hidden"}}>
+            {resultados.map(r=>(
+              <button key={r.tipo+r.id} onClick={()=>selecionar(r)}
+                style={{width:"100%",textAlign:"left",padding:"10px 14px",border:"none",borderBottom:"1px solid #F8FAFC",
+                  background:"#fff",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
+                <span style={{fontSize:13,fontWeight:600,color:"#111827"}}>{r.label}</span>
+                <span style={{fontSize:10.5,fontWeight:700,color:r.tipo==="pool"?"#7C3AED":"#94A3B8",
+                  background:r.tipo==="pool"?"#F5F3FF":"#F8FAFC",padding:"2px 8px",borderRadius:99,whiteSpace:"nowrap"}}>
+                  {r.tipo==="pool"?"Estoque":r.sub||"Unidade"}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+      </>):(
+        <>
+          <h4 style={{fontSize:12,fontWeight:800,color:"#374151",textTransform:"uppercase",letterSpacing:".05em",margin:"0 0 8px"}}>
+            Ferramentas mais emprestadas
+          </h4>
+          {carregandoRanking?<div style={{padding:30,textAlign:"center"}}><Spinner size={16}/></div>:
+          !ranking||ranking.length===0?<EmptyState icon={Wrench} title="Nenhum empréstimo registrado ainda"/>:(
+            <div style={{background:"#fff",border:"1px solid #F1F5F9",borderRadius:12,overflow:"hidden"}}>
+              {ranking.map((r,i)=><LinhaRanking key={i} label={r.label} total={r.total} tempoMedioMs={r.tempoMedioMs}
+                abertas={r.abertas} onClick={()=>selecionar(r.item)}/>)}
+            </div>
+          )}
+        </>
       )}
     </div>
-  );
+    );
+  }
 
   return(
     <div>
@@ -3072,6 +3160,8 @@ function HistoricoPorMecanicoView({profile,pessoas}){
   const[selecionado,setSelecionado]=useState(null);
   const[dados,setDados]=useState(null);
   const[carregando,setCarregando]=useState(false);
+  const[ranking,setRanking]=useState(null);
+  const[carregandoRanking,setCarregandoRanking]=useState(false);
 
   const pessoasPermitidas=useMemo(()=>
     profile.userType==="admin_geral"?pessoas:(pessoas||[]).filter(p=>profile.filialIds.includes(p.filial_id))
@@ -3082,6 +3172,48 @@ function HistoricoPorMecanicoView({profile,pessoas}){
     if(termo.length<2)return[];
     return pessoasPermitidas.filter(p=>p.name?.toLowerCase().includes(termo)||p.matricula?.includes(termo)).slice(0,15);
   },[busca,pessoasPermitidas]);
+
+  // Ranking geral (todo mundo que já pegou alguma ferramenta emprestada), visão padrão da aba
+  // antes de buscar alguém específico.
+  async function carregarRanking(){
+    if(pessoasPermitidas.length===0){setRanking([]);return;}
+    setCarregandoRanking(true);
+    const idsPermitidos=new Set(pessoasPermitidas.map(p=>p.id));
+    const[{data:movs},{data:emp}]=await Promise.all([
+      supabase.from("movimentacoes").select("pessoa_responsavel_id,tipo,data,ferramenta_id")
+        .in("tipo",["retirada","devolucao"]).not("pessoa_responsavel_id","is",null)
+        .order("data",{ascending:true}).limit(3000),
+      supabase.from("emprestimos").select("colaborador_id,quantidade,data_retirada,data_devolucao")
+        .order("data_retirada",{ascending:true}).limit(3000),
+    ]);
+    const gruposFerramenta={};
+    (movs||[]).forEach(m=>{(gruposFerramenta[m.ferramenta_id]=gruposFerramenta[m.ferramenta_id]||[]).push(m);});
+    const sessoes=[];
+    for(const fid in gruposFerramenta){
+      let aberta=null;
+      for(const m of gruposFerramenta[fid]){
+        if(m.tipo==="retirada")aberta={pessoaId:m.pessoa_responsavel_id,dataRetirada:m.data,dataDevolucao:null};
+        else if(m.tipo==="devolucao"&&aberta){aberta.dataDevolucao=m.data;sessoes.push(aberta);aberta=null;}
+      }
+      if(aberta)sessoes.push(aberta);
+    }
+    (emp||[]).forEach(e=>{
+      if(!e.colaborador_id)return;
+      sessoes.push({pessoaId:e.colaborador_id,dataRetirada:e.data_retirada,dataDevolucao:e.data_devolucao});
+    });
+    const porPessoa={};
+    sessoes.forEach(s=>{
+      if(!idsPermitidos.has(s.pessoaId))return;
+      (porPessoa[s.pessoaId]=porPessoa[s.pessoaId]||[]).push(s);
+    });
+    const linhas=Object.entries(porPessoa).map(([pessoaId,sess])=>{
+      const pessoa=pessoasPermitidas.find(p=>p.id===pessoaId);
+      return{item:pessoa||{id:pessoaId,name:"—"},label:pessoa?.name||"—",...calcularIndicadores(sess)};
+    }).sort((a,b)=>b.total-a.total);
+    setRanking(linhas);
+    setCarregandoRanking(false);
+  }
+  useEffect(()=>{carregarRanking();},[pessoasPermitidas]);
 
   async function selecionar(p){
     setSelecionado(p);setDados(null);setCarregando(true);
@@ -3112,31 +3244,50 @@ function HistoricoPorMecanicoView({profile,pessoas}){
     setCarregando(false);
   }
 
-  if(!selecionado)return(
-    <div style={{maxWidth:480}}>
-      <div style={{display:"flex",alignItems:"center",gap:8,border:"1.5px solid #E2E8F0",borderRadius:9,padding:"8px 12px",marginBottom:8}}>
+  if(!selecionado){
+    const buscaAtiva=busca.trim().length>=2;
+    return(
+    <div>
+      <div style={{maxWidth:480,display:"flex",alignItems:"center",gap:8,border:"1.5px solid #E2E8F0",
+        borderRadius:9,padding:"8px 12px",marginBottom:14}}>
         <Search size={14} color="#94A3B8"/>
         <input autoFocus placeholder="Buscar por nome ou matrícula..." value={busca}
           onChange={e=>setBusca(e.target.value)}
           style={{border:"none",fontSize:13,color:"#374151",width:"100%",background:"transparent",outline:"none"}}/>
       </div>
-      {busca.trim().length>=2&&resultados.length===0&&(
-        <div style={{fontSize:12.5,color:"#9CA3AF",padding:"8px 4px"}}>Nada encontrado.</div>
-      )}
-      {resultados.length>0&&(
-        <div style={{background:"#fff",border:"1px solid #F1F5F9",borderRadius:12,overflow:"hidden"}}>
-          {resultados.map(p=>(
-            <button key={p.id} onClick={()=>selecionar(p)}
-              style={{width:"100%",textAlign:"left",padding:"10px 14px",border:"none",borderBottom:"1px solid #F8FAFC",
-                background:"#fff",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
-              <span style={{fontSize:13,fontWeight:600,color:"#111827"}}>{p.name}</span>
-              <span style={{fontSize:11,color:"#94A3B8"}}>{p.matricula?`Matrícula ${p.matricula}`:""}</span>
-            </button>
-          ))}
-        </div>
+      {buscaAtiva?(<>
+        {resultados.length===0&&(
+          <div style={{fontSize:12.5,color:"#9CA3AF",padding:"8px 4px"}}>Nada encontrado.</div>
+        )}
+        {resultados.length>0&&(
+          <div style={{maxWidth:480,background:"#fff",border:"1px solid #F1F5F9",borderRadius:12,overflow:"hidden"}}>
+            {resultados.map(p=>(
+              <button key={p.id} onClick={()=>selecionar(p)}
+                style={{width:"100%",textAlign:"left",padding:"10px 14px",border:"none",borderBottom:"1px solid #F8FAFC",
+                  background:"#fff",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
+                <span style={{fontSize:13,fontWeight:600,color:"#111827"}}>{p.name}</span>
+                <span style={{fontSize:11,color:"#94A3B8"}}>{p.matricula?`Matrícula ${p.matricula}`:""}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </>):(
+        <>
+          <h4 style={{fontSize:12,fontWeight:800,color:"#374151",textTransform:"uppercase",letterSpacing:".05em",margin:"0 0 8px"}}>
+            Mecânicos mais ativos
+          </h4>
+          {carregandoRanking?<div style={{padding:30,textAlign:"center"}}><Spinner size={16}/></div>:
+          !ranking||ranking.length===0?<EmptyState icon={Users} title="Nenhum empréstimo registrado ainda"/>:(
+            <div style={{background:"#fff",border:"1px solid #F1F5F9",borderRadius:12,overflow:"hidden"}}>
+              {ranking.map((r,i)=><LinhaRanking key={i} label={r.label} total={r.total} tempoMedioMs={r.tempoMedioMs}
+                abertas={r.abertas} onClick={()=>selecionar(r.item)}/>)}
+            </div>
+          )}
+        </>
       )}
     </div>
-  );
+    );
+  }
 
   return(
     <div>
