@@ -4,6 +4,20 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Ferramentaria Deva</title>
+  <!-- GitHub Pages não permite header HTTP real, então a meta tag é a única forma de CSP
+       disponível aqui. Não cobre tudo (ex. frame-ancestors), mas fecha script/estilo/conexão
+       a uma lista explícita em vez de deixar tudo liberado. -->
+  <meta http-equiv="Content-Security-Policy" content="
+    default-src 'self';
+    base-uri 'self';
+    object-src 'none';
+    script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com https://unpkg.com https://esm.sh https://challenges.cloudflare.com;
+    style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
+    font-src https://fonts.gstatic.com;
+    img-src 'self' data: blob: https://zdwkdfsqxkcrnkovdvba.supabase.co;
+    connect-src 'self' https://zdwkdfsqxkcrnkovdvba.supabase.co https://esm.sh https://unpkg.com https://challenges.cloudflare.com;
+    frame-src https://challenges.cloudflare.com;
+  " />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
@@ -116,17 +130,23 @@ const BLUE="#1955FF";
 const MONTHS=["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
 
 /* ── RESPONSIVO ─────────────────────────────────── */
+// Layout "mobile" (menu no rodapé, cards em vez de tabela etc.): celular sempre, e tablet só
+// quando em pé — deitado (largura ≥ altura) o tablet usa o layout de computador normalmente.
+// Baseado em orientação, não só largura, porque a largura de um tablet em pé (768–834px típico)
+// se sobrepõe à faixa "estreita" que também acontece num navegador de computador redimensionado.
 const MOBILE_BREAKPOINT=768;
+function isMobileViewport(){
+  if(typeof window==="undefined")return false;
+  const w=window.innerWidth,h=window.innerHeight;
+  return w<MOBILE_BREAKPOINT||(h>w&&w<=1200);
+}
 function useIsMobile(){
-  const query=`(max-width:${MOBILE_BREAKPOINT}px)`;
-  const[mobile,setMobile]=useState(()=>typeof window!=="undefined"&&window.matchMedia(query).matches);
+  const[mobile,setMobile]=useState(isMobileViewport);
   useEffect(()=>{
-    const mq=window.matchMedia(query);
-    const handler=e=>setMobile(e.matches);
-    setMobile(mq.matches);
-    if(mq.addEventListener)mq.addEventListener("change",handler);
-    else mq.addListener(handler);
-    return()=>{if(mq.removeEventListener)mq.removeEventListener("change",handler);else mq.removeListener(handler);};
+    const fn=()=>setMobile(isMobileViewport());
+    window.addEventListener("resize",fn);
+    window.addEventListener("orientationchange",fn);
+    return()=>{window.removeEventListener("resize",fn);window.removeEventListener("orientationchange",fn);};
   },[]);
   return mobile;
 }
@@ -673,20 +693,10 @@ function UserFooterMenu({currentUser,collapsed,onViewProfile,onLogout}){
   );
 }
 
-function Sidebar({currentUser,activeNav,setActiveNav,onLogout,onViewProfile,
-  notifications,notifOpen,onNotifToggle,markNotifRead,markAllNotifRead,
-  isMobile=false,drawerOpen=false,onRequestClose}){
-  const[collapsedState,setCollapsedState]=useState(true);
-  const drawer=isMobile;
-  const collapsed=drawer?false:collapsedState;
-  const setCollapsed=setCollapsedState;
-  const closeIfDrawer=()=>{if(drawer)onRequestClose&&onRequestClose();};
-  const ut=currentUser.userType;
-  const isAdminGeral=ut==="admin_geral";
-  const isAdminArea=ut==="admin_area";
-  const isColaborador=ut==="colaborador";
-
-  const nav=isColaborador?[
+// Itens de navegação por papel — únicos, usados tanto pelo menu lateral (desktop) quanto pela
+// barra de navegação do rodapé (celular / tablet em pé), pra nunca ficarem fora de sincronia.
+function navItemsFor(userType){
+  return userType==="colaborador"?[
     {id:"ferramentas",label:"Estoque",Icon:Wrench},
   ]:[
     {id:"dashboard",label:"Dashboard",Icon:LayoutDashboard},
@@ -695,31 +705,27 @@ function Sidebar({currentUser,activeNav,setActiveNav,onLogout,onViewProfile,
     {id:"relatorios",label:"Relatórios",Icon:BarChart3},
     {id:"configuracoes",label:"Configurações",Icon:Settings},
   ];
+}
 
-  const W=drawer?272:(collapsed?56:240);
+function Sidebar({currentUser,activeNav,setActiveNav,onLogout,onViewProfile,
+  notifications,notifOpen,onNotifToggle,markNotifRead,markAllNotifRead}){
+  const[collapsed,setCollapsed]=useState(true);
+  const nav=navItemsFor(currentUser.userType);
+  const W=collapsed?56:240;
 
   return(
-    <>
-    {drawer&&(
-      <div onClick={onRequestClose}
-        style={{position:"fixed",inset:0,zIndex:999,background:"rgba(0,0,0,.5)",
-          opacity:drawerOpen?1:0,pointerEvents:drawerOpen?"auto":"none",transition:"opacity .26s ease"}}/>
-    )}
     <aside style={{width:W,flexShrink:0,height:"100%",background:"#0A0A0B",
       display:"flex",flexDirection:"column",overflow:"hidden",
-      ...(drawer
-        ?{position:"fixed",top:0,left:0,zIndex:1000,transform:drawerOpen?"translateX(0)":"translateX(-100%)",
-          transition:"transform .26s cubic-bezier(.4,0,.2,1)",boxShadow:drawerOpen?"0 0 48px rgba(0,0,0,.5)":"none"}
-        :{transition:"width .24s cubic-bezier(.4,0,.2,1)"})}}>
+      transition:"width .24s cubic-bezier(.4,0,.2,1)"}}>
       <div style={{height:64,borderBottom:"1px solid rgba(255,255,255,.07)",display:"flex",alignItems:"center",flexShrink:0}}>
-        <button onClick={e=>{e.stopPropagation();if(drawer){onRequestClose&&onRequestClose();}else{setCollapsed(v=>!v);}}}
-          title={drawer?"Fechar menu":(collapsed?"Expandir menu":"Recolher menu")}
+        <button onClick={e=>{e.stopPropagation();setCollapsed(v=>!v);}}
+          title={collapsed?"Expandir menu":"Recolher menu"}
           style={{width:28,height:28,marginLeft:14,flexShrink:0,borderRadius:8,border:"none",background:"transparent",
             cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",color:"#A1A1AA",
             transition:"background .15s,color .15s"}}
           onMouseEnter={e=>{e.currentTarget.style.background="#18181B";e.currentTarget.style.color="#fff";}}
           onMouseLeave={e=>{e.currentTarget.style.background="transparent";e.currentTarget.style.color="#A1A1AA";}}>
-          {drawer?<X size={18}/>:<Menu size={18}/>}
+          <Menu size={18}/>
         </button>
         {!collapsed&&(
           <div style={{marginLeft:14,flex:1,minWidth:0,display:"flex",alignItems:"center",opacity:0,animation:"fadeIn .22s ease .08s forwards"}}>
@@ -731,7 +737,7 @@ function Sidebar({currentUser,activeNav,setActiveNav,onLogout,onViewProfile,
         {nav.map(({id,label,Icon})=>{
           const active=activeNav===id;
           return(
-            <button key={id} onClick={e=>{e.stopPropagation();setActiveNav(id);closeIfDrawer();}}
+            <button key={id} onClick={e=>{e.stopPropagation();setActiveNav(id);}}
               title={collapsed?label:""}
               onMouseEnter={e=>{if(!active){e.currentTarget.style.background="#18181B";e.currentTarget.style.color="#D4D4D8";}}}
               onMouseLeave={e=>{if(!active){e.currentTarget.style.background="transparent";e.currentTarget.style.color="#71717A";}}}
@@ -750,7 +756,7 @@ function Sidebar({currentUser,activeNav,setActiveNav,onLogout,onViewProfile,
           );
         })}
       </nav>
-      {!drawer&&(()=>{
+      {(()=>{
         const unread=(notifications||[]).filter(n=>!n.is_read).length;
         return(
           <div style={{padding:"0 8px 4px",position:"relative"}}>
@@ -789,9 +795,83 @@ function Sidebar({currentUser,activeNav,setActiveNav,onLogout,onViewProfile,
         );
       })()}
       <UserFooterMenu currentUser={currentUser} collapsed={collapsed}
-        onViewProfile={()=>{onViewProfile&&onViewProfile();closeIfDrawer();}} onLogout={onLogout}/>
+        onViewProfile={onViewProfile} onLogout={onLogout}/>
     </aside>
-    </>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════
+   BARRA DE NAVEGAÇÃO MOBILE (rodapé fixo) — substitui o menu lateral em
+   celular e em tablet quando em pé (ver isMobileViewport). O topo (logo,
+   sino de notificações e avatar) fica no cabeçalho fixo montado pelo App().
+   ══════════════════════════════════════════════════════════════ */
+function MobileBottomNav({items,activeNav,setActiveNav}){
+  return(
+    <nav style={{flexShrink:0,zIndex:40,display:"flex",background:"#fff",
+      borderTop:"1px solid #F1F5F9",boxShadow:"0 -2px 12px rgba(0,0,0,.05)",
+      paddingBottom:"env(safe-area-inset-bottom)"}}>
+      {items.map(({id,label,Icon})=>{
+        const active=activeNav===id;
+        return(
+          <button key={id} onClick={()=>setActiveNav(id)}
+            style={{flex:1,minWidth:0,height:56,border:"none",background:"transparent",
+              cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",
+              justifyContent:"center",gap:3,color:active?BLUE:"#94A3B8"}}>
+            <Icon size={19} color="currentColor"/>
+            <span style={{fontSize:9.5,fontWeight:700,whiteSpace:"nowrap",
+              overflow:"hidden",textOverflow:"ellipsis",maxWidth:"100%",padding:"0 2px"}}>
+              {label}
+            </span>
+          </button>
+        );
+      })}
+    </nav>
+  );
+}
+
+// Botão de avatar do cabeçalho mobile — abre o mesmo menu (Meu Perfil / Sair) que o rodapé
+// do menu lateral no desktop, só que ancorado no topo em vez do rodapé.
+function MobileHeaderAvatar({currentUser,onViewProfile,onLogout}){
+  const[open,setOpen]=useState(false);
+  const wrapRef=useRef(null);
+  const popRef=useRef(null);
+  useEffect(()=>{
+    if(!open)return;
+    function onDoc(e){
+      if(popRef.current&&popRef.current.contains(e.target))return;
+      if(wrapRef.current&&wrapRef.current.contains(e.target))return;
+      setOpen(false);
+    }
+    document.addEventListener("mousedown",onDoc);
+    return()=>document.removeEventListener("mousedown",onDoc);
+  },[open]);
+
+  return(
+    <div ref={wrapRef} style={{position:"relative"}}>
+      <button onClick={e=>{e.stopPropagation();setOpen(v=>!v);}}
+        style={{width:32,height:32,borderRadius:"50%",border:"none",cursor:"pointer",flexShrink:0,
+          background:currentUser.color||BLUE,display:"flex",alignItems:"center",justifyContent:"center",
+          fontSize:11,fontWeight:800,color:"#fff"}}>
+        {getInitials(currentUser.name)}
+      </button>
+      {open&&createPortal(
+        <div ref={popRef} className="up" style={{position:"fixed",right:12,top:52,width:200,background:"#18181B",
+          borderRadius:12,border:"1px solid rgba(255,255,255,.08)",boxShadow:"0 16px 40px rgba(0,0,0,.4)",
+          padding:6,zIndex:1200}}>
+          <button onClick={()=>{onViewProfile();setOpen(false);}}
+            style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"9px 12px",borderRadius:8,
+              border:"none",background:"transparent",cursor:"pointer",textAlign:"left",color:"#D4D4D8",fontSize:13,fontWeight:500}}>
+            <UserCheck size={14}/>Meu Perfil
+          </button>
+          <button onClick={onLogout}
+            style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"9px 12px",borderRadius:8,
+              border:"none",background:"transparent",cursor:"pointer",textAlign:"left",color:"#D4D4D8",fontSize:13,fontWeight:500}}>
+            <LogOut size={14}/>Sair
+          </button>
+        </div>,
+        document.body
+      )}
+    </div>
   );
 }
 
@@ -3997,7 +4077,6 @@ function App(){
   const[configSection,setConfigSection]=useState("perfil");
   const[notifications,setNotifications]=useState([]);
   const[notifOpen,setNotifOpen]=useState(false);
-  const[drawerOpen,setDrawerOpen]=useState(false);
   const[viewingProfile,setViewingProfile]=useState(false);
   const isMobile=useIsMobile();
 
@@ -4094,26 +4173,57 @@ function App(){
     }
   }
 
+  const unreadCount=notifications.filter(n=>!n.is_read).length;
+
   return(
     <div style={{height:"100vh",display:"flex",background:"#F8FAFC"}}>
-      <Sidebar currentUser={profile} activeNav={activeNav} setActiveNav={id=>{setActiveNav(id);setViewingProfile(false);}}
-        onLogout={handleLogout} onViewProfile={()=>setViewingProfile(true)}
-        notifications={notifications} notifOpen={notifOpen} onNotifToggle={()=>setNotifOpen(v=>!v)}
-        markNotifRead={markNotifRead} markAllNotifRead={markAllNotifRead}
-        isMobile={isMobile} drawerOpen={drawerOpen} onRequestClose={()=>setDrawerOpen(false)}/>
-      <main style={{flex:1,overflowY:"auto",minWidth:0}} onClick={()=>notifOpen&&setNotifOpen(false)}>
+      {/* Menu lateral: só no desktop (largura ≥768 e não é tablet em pé). Em celular/tablet
+          em pé, a navegação vira a barra fixa no rodapé (MobileBottomNav), abaixo. */}
+      {!isMobile&&(
+        <Sidebar currentUser={profile} activeNav={activeNav} setActiveNav={id=>{setActiveNav(id);setViewingProfile(false);}}
+          onLogout={handleLogout} onViewProfile={()=>setViewingProfile(true)}
+          notifications={notifications} notifOpen={notifOpen} onNotifToggle={()=>setNotifOpen(v=>!v)}
+          markNotifRead={markNotifRead} markAllNotifRead={markAllNotifRead}/>
+      )}
+      <div style={{flex:1,minWidth:0,display:"flex",flexDirection:"column",overflow:"hidden"}}>
         {isMobile&&(
-          <div style={{height:56,display:"flex",alignItems:"center",padding:"0 16px",borderBottom:"1px solid #F1F5F9",
-            background:"#fff",position:"sticky",top:0,zIndex:50}}>
-            <button onClick={e=>{e.stopPropagation();setDrawerOpen(true);}}
-              style={{border:"none",background:"none",cursor:"pointer",color:"#374151",display:"flex"}}>
-              <Menu size={20}/>
-            </button>
-            <div style={{marginLeft:14}}><Logo color="#0A0A0B" height={13}/></div>
+          <div style={{height:56,flexShrink:0,display:"flex",alignItems:"center",gap:10,padding:"0 12px 0 16px",
+            borderBottom:"1px solid #F1F5F9",background:"#fff",position:"sticky",top:0,zIndex:50}}
+            onClick={()=>notifOpen&&setNotifOpen(false)}>
+            <div style={{flex:1,minWidth:0}}><Logo color="#0A0A0B" height={13}/></div>
+            <div style={{position:"relative"}}>
+              <button onClick={e=>{e.stopPropagation();setNotifOpen(v=>!v);}}
+                style={{width:34,height:34,border:"none",background:"#F8FAFC",borderRadius:9,cursor:"pointer",
+                  display:"flex",alignItems:"center",justifyContent:"center",position:"relative",color:"#374151"}}>
+                <Bell size={17}/>
+                {unreadCount>0&&(
+                  <span style={{position:"absolute",top:2,right:2,minWidth:14,height:14,borderRadius:99,
+                    background:"#EF4444",border:"2px solid #fff",display:"flex",alignItems:"center",
+                    justifyContent:"center",fontSize:8,fontWeight:800,color:"#fff",padding:"0 2px",lineHeight:1}}>
+                    {unreadCount>9?"9+":unreadCount}
+                  </span>
+                )}
+              </button>
+              {notifOpen&&(
+                <div style={{position:"fixed",right:12,top:52,zIndex:600}} onClick={e=>e.stopPropagation()}>
+                  <NotificationPanel notifications={notifications} onMarkRead={markNotifRead}
+                    onMarkAllRead={markAllNotifRead} onClose={()=>setNotifOpen(false)}/>
+                </div>
+              )}
+            </div>
+            <MobileHeaderAvatar currentUser={profile}
+              onViewProfile={()=>setViewingProfile(true)} onLogout={handleLogout}/>
           </div>
         )}
-        {content}
-      </main>
+        <main style={{flex:1,overflowY:"auto",minWidth:0}} onClick={()=>notifOpen&&setNotifOpen(false)}>
+          {content}
+        </main>
+        {isMobile&&(
+          <MobileBottomNav items={navItemsFor(profile.userType)}
+            activeNav={viewingProfile?null:activeNav}
+            setActiveNav={id=>{setActiveNav(id);setViewingProfile(false);}}/>
+        )}
+      </div>
     </div>
   );
 }
