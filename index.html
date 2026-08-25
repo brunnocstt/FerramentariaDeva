@@ -766,7 +766,7 @@ function Sidebar({currentUser,activeNav,setActiveNav,onLogout,onViewProfile,
         {nav.map(({id,label,Icon})=>{
           const active=activeNav===id;
           return(
-            <button key={id} onClick={e=>{e.stopPropagation();setActiveNav(id);}}
+            <button key={id} onClick={e=>{e.stopPropagation();setActiveNav(id);setCollapsed(true);}}
               title={collapsed?label:""}
               onMouseEnter={e=>{if(!active){e.currentTarget.style.background="#18181B";e.currentTarget.style.color="#D4D4D8";}}}
               onMouseLeave={e=>{if(!active){e.currentTarget.style.background="transparent";e.currentTarget.style.color="#71717A";}}}
