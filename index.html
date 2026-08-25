@@ -6,16 +6,18 @@
   <title>Ferramentaria Deva</title>
   <!-- GitHub Pages não permite header HTTP real, então a meta tag é a única forma de CSP
        disponível aqui. Não cobre tudo (ex. frame-ancestors), mas fecha script/estilo/conexão
-       a uma lista explícita em vez de deixar tudo liberado. -->
+       a uma lista explícita em vez de deixar tudo liberado. static.cloudflareinsights.com é o
+       beacon de analytics que o próprio GitHub Pages injeta automaticamente em domínio custom
+       — inofensivo, liberado só pra não gerar erro de CSP bloqueado no console de todo usuário. -->
   <meta http-equiv="Content-Security-Policy" content="
     default-src 'self';
     base-uri 'self';
     object-src 'none';
-    script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com https://unpkg.com https://esm.sh https://challenges.cloudflare.com;
+    script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com https://unpkg.com https://esm.sh https://challenges.cloudflare.com https://static.cloudflareinsights.com;
     style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
     font-src https://fonts.gstatic.com;
     img-src 'self' data: blob: https://zdwkdfsqxkcrnkovdvba.supabase.co;
-    connect-src 'self' https://zdwkdfsqxkcrnkovdvba.supabase.co https://esm.sh https://unpkg.com https://challenges.cloudflare.com;
+    connect-src 'self' https://zdwkdfsqxkcrnkovdvba.supabase.co https://esm.sh https://unpkg.com https://challenges.cloudflare.com https://cloudflareinsights.com;
     frame-src https://challenges.cloudflare.com;
   " />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
