@@ -384,14 +384,18 @@ function EmptyState({icon:Icon,title,text}){
 function StatCard({label,value,Icon,color=BLUE}){
   return(
     <div className="lift" style={{background:"#fff",borderRadius:16,border:"1px solid #F1F5F9",padding:18,
-      display:"flex",alignItems:"center",gap:14}}>
+      display:"flex",alignItems:"center",gap:14,minWidth:0}}>
       <div style={{width:44,height:44,borderRadius:12,background:`${color}12`,display:"flex",
         alignItems:"center",justifyContent:"center",flexShrink:0}}>
         <Icon size={20} color={color}/>
       </div>
-      <div style={{minWidth:0}}>
+      <div style={{minWidth:0,flex:1}}>
         <div style={{fontSize:22,fontWeight:800,color:"#111827",lineHeight:1.1}}>{value}</div>
-        <div style={{fontSize:12,color:"#6B7280",fontWeight:600,marginTop:2}}>{label}</div>
+        {/* Travado numa linha só com reticências — sem isso, os rótulos mais longos ("Aferições
+            Próx. 7 dias", "Total de Ferramentas") quebravam em 2 linhas e deixavam só aquele
+            card mais alto que os vizinhos na mesma fileira. */}
+        <div title={label} style={{fontSize:12,color:"#6B7280",fontWeight:600,marginTop:2,
+          whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{label}</div>
       </div>
     </div>
   );
@@ -1095,8 +1099,12 @@ function DashboardView({profile,filiais}){
         <StatCard label="Extraviadas" value={stats.extraviada||0} Icon={AlertTriangle} color="#B91C1C"/>
         <StatCard label="Aferições Vencidas" value={stats.vencidas} Icon={AlertCircle} color="#B91C1C"/>
         <StatCard label="Aferições Próx. 7 dias" value={stats.proximas} Icon={Calendar} color="#D97706"/>
-        {stats.licencasVencidas>0&&<StatCard label="Licenças Vencidas" value={stats.licencasVencidas} Icon={AlertCircle} color="#B91C1C"/>}
-        {stats.licencasProximas>0&&<StatCard label="Licenças Próx. 7 dias" value={stats.licencasProximas} Icon={Calendar} color="#D97706"/>}
+        {/* Os dois juntos ou nenhum — mostrar só 1 deixava a contagem ímpar e sobrava outro
+            card sozinho numa linha, o mesmo problema de novo. */}
+        {(stats.licencasVencidas>0||stats.licencasProximas>0)&&<>
+          <StatCard label="Licenças Vencidas" value={stats.licencasVencidas} Icon={AlertCircle} color="#B91C1C"/>
+          <StatCard label="Licenças Próx. 7 dias" value={stats.licencasProximas} Icon={Calendar} color="#D97706"/>
+        </>}
       </div>
       {atingimento&&atingimento.length>0&&(
         <div style={{background:"#fff",border:"1px solid #F1F5F9",borderRadius:14,padding:"18px 20px",marginBottom:14}}>
