@@ -25,6 +25,11 @@
        navegação mobile) acabava saindo do lugar certo. 100dvh é a altura visível real; o
        100vh antes dela é só fallback pra navegador que não suporta dvh. */
     .app-shell{height:100vh;height:100dvh;}
+    /* Mesmo problema do app-shell, só que em max-height: com 88vh, o Safari calcula contra a
+       altura "cheia" (contando a barra do navegador), então o modal podia nascer mais alto que
+       a área visível de verdade — cortando o rodapé com os botões Salvar/Cancelar antes mesmo
+       de dar pra rolar até lá. 88dvh é o valor que bate com o que a pessoa realmente vê. */
+    .modal-box{max-height:88vh;max-height:88dvh;}
     *{font-family:"Plus Jakarta Sans",system-ui,sans-serif;box-sizing:border-box;}
     ::-webkit-scrollbar{width:5px;height:5px;}
     ::-webkit-scrollbar-track{background:transparent;}
@@ -319,7 +324,7 @@ function Modal({title,onClose,children,width=480,footer}){
   return(
     <div className="fade" style={{position:"fixed",inset:0,zIndex:2000,background:"rgba(15,23,42,.5)",
       display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={onClose}>
-      <div className="up" style={{width:"100%",maxWidth:width,maxHeight:"88vh",background:"#fff",borderRadius:18,
+      <div className="up modal-box" style={{width:"100%",maxWidth:width,background:"#fff",borderRadius:18,
         boxShadow:"0 20px 60px rgba(0,0,0,.25)",display:"flex",flexDirection:"column",overflow:"hidden"}}
         onClick={e=>e.stopPropagation()}>
         <div style={{padding:"18px 22px",borderBottom:"1px solid #F1F5F9",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
@@ -329,7 +334,7 @@ function Modal({title,onClose,children,width=480,footer}){
             <X size={15}/>
           </button>
         </div>
-        <div style={{padding:22,overflowY:"auto",flex:1}}>{children}</div>
+        <div style={{padding:22,overflowY:"auto",flex:1,minHeight:0,WebkitOverflowScrolling:"touch"}}>{children}</div>
         {footer&&<div style={{padding:"16px 22px",borderTop:"1px solid #F1F5F9",display:"flex",justifyContent:"flex-end",gap:10}}>{footer}</div>}
       </div>
     </div>
