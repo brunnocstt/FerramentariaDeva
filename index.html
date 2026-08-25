@@ -226,6 +226,7 @@ const STATUS_FERRAMENTA_INFO={
   com_colaborador:{label:"Com Colaborador",color:"#1955FF",bg:"#EEF2FF"},
   em_afericao:{label:"Em Aferição",color:"#D97706",bg:"#FFFBEB"},
   em_conserto:{label:"Em Reparo",color:"#DB2777",bg:"#FDF2F8"},
+  indisponivel:{label:"Indisponível para Uso",color:"#B91C1C",bg:"#FEF2F2"},
   em_transferencia:{label:"Em Transferência",color:"#7C3AED",bg:"#F5F3FF"},
   extraviada:{label:"Extraviada",color:"#B91C1C",bg:"#FEF2F2"},
   baixada:{label:"Baixada",color:"#6B7280",bg:"#F3F4F6"},
@@ -977,6 +978,7 @@ function UsoAoVivoPanel(){
 }
 
 function DashboardView({profile,filiais}){
+  const isMobile=useIsMobile();
   const[stats,setStats]=useState(null);
   const[atingimento,setAtingimento]=useState(null);
   const[checklistFaltando,setChecklistFaltando]=useState([]);
@@ -1073,30 +1075,29 @@ function DashboardView({profile,filiais}){
   if(!stats)return null;
 
   return(
-    <div className="fade" style={{padding:"28px 32px"}}>
+    <div className="fade" style={{padding:isMobile?"20px 16px":"28px 32px"}}>
       <h1 style={{fontSize:22,fontWeight:800,color:"#111827",margin:"0 0 4px"}}>Dashboard</h1>
       <p style={{fontSize:13,color:"#6B7280",margin:"0 0 24px"}}>
         Visão geral {profile.userType==="admin_geral"?"de todas as filiais":
           profile.filiaisAcesso.length>1?`das filiais ${profile.filiaisAcesso.map(f=>f.nome).join(", ")}`:`da filial ${profile.filialNome}`}.
       </p>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:14,marginBottom:14}}>
+      {/* Um grid só, com número de colunas fixo (não auto-fit/minmax) — era isso que causava o
+          "3 quebra, sobra 1" feio: dois grids de 4 cards cada, e auto-fit não fechava as 4
+          colunas no meio-termo de largura, sobrando sempre 1 órfão por linha. Fixo em 4 colunas
+          (2 no mobile) fecha sempre certinho, e as licenças (quando aparecem) entram no mesmo
+          grid em vez de abrir uma terceira fileira separada. */}
+      <div style={{display:"grid",gridTemplateColumns:isMobile?"repeat(2,1fr)":"repeat(4,1fr)",gap:14,marginBottom:14}}>
         <StatCard label="Total de Ferramentas" value={stats.total} Icon={Wrench} color={BLUE}/>
         <StatCard label="Disponíveis" value={stats.disponivel||0} Icon={PackageCheck} color="#059669"/>
         <StatCard label="Com Colaborador" value={stats.com_colaborador||0} Icon={Users} color={BLUE}/>
         <StatCard label="Em Aferição" value={stats.em_afericao||0} Icon={Clock} color="#D97706"/>
-      </div>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:14,marginBottom:14}}>
         <StatCard label="Em Reparo" value={stats.em_conserto||0} Icon={PackageX} color="#DB2777"/>
         <StatCard label="Extraviadas" value={stats.extraviada||0} Icon={AlertTriangle} color="#B91C1C"/>
         <StatCard label="Aferições Vencidas" value={stats.vencidas} Icon={AlertCircle} color="#B91C1C"/>
         <StatCard label="Aferições Próx. 7 dias" value={stats.proximas} Icon={Calendar} color="#D97706"/>
+        {stats.licencasVencidas>0&&<StatCard label="Licenças Vencidas" value={stats.licencasVencidas} Icon={AlertCircle} color="#B91C1C"/>}
+        {stats.licencasProximas>0&&<StatCard label="Licenças Próx. 7 dias" value={stats.licencasProximas} Icon={Calendar} color="#D97706"/>}
       </div>
-      {(stats.licencasVencidas>0||stats.licencasProximas>0)&&(
-        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:14,marginBottom:14}}>
-          <StatCard label="Licenças Vencidas" value={stats.licencasVencidas} Icon={AlertCircle} color="#B91C1C"/>
-          <StatCard label="Licenças Próx. 7 dias" value={stats.licencasProximas} Icon={Calendar} color="#D97706"/>
-        </div>
-      )}
       {atingimento&&atingimento.length>0&&(
         <div style={{background:"#fff",border:"1px solid #F1F5F9",borderRadius:14,padding:"18px 20px",marginBottom:14}}>
           <h2 style={{fontSize:15,fontWeight:800,color:"#111827",margin:"0 0 3px"}}>Atingimento de Ferramentas Obrigatórias</h2>
@@ -1443,6 +1444,12 @@ function FerramentaDetalheModal({ferramenta,onClose,onChanged,profile,filiais,ca
     ],
     em_conserto:[
       {tipo:"retorno_conserto",label:"Registrar Retorno do Reparo",Icon:PackageCheck},
+    ],
+    // Ferramenta devolvida "Totalmente Danificada" cai aqui — só pode ir pra reparo ou baixa,
+    // nunca direto pra disponível de novo.
+    indisponivel:[
+      {tipo:"envio_conserto",label:"Enviar para Reparo",Icon:PackageX},
+      ...(isAdmin?[{tipo:"baixa",label:"Dar Baixa",Icon:Ban,danger:true,adminOnly:true}]:[]),
     ],
     extraviada:isAdmin?[{tipo:"reativacao",label:"Marcar como Encontrada",Icon:RefreshCw},
       {tipo:"baixa",label:"Dar Baixa",Icon:Ban,danger:true,adminOnly:true}]:[],
