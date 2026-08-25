@@ -4653,7 +4653,9 @@ function App(){
               onViewProfile={()=>setViewingProfile(true)} onLogout={handleLogout}/>
           </div>
         )}
-        <main style={{flex:1,overflowY:"auto",minWidth:0,minHeight:0}} onClick={()=>notifOpen&&setNotifOpen(false)}>
+        <main style={{flex:1,overflowY:"auto",minWidth:0,minHeight:0,overflowAnchor:"none",
+          overscrollBehaviorY:"contain",WebkitOverflowScrolling:"touch"}}
+          onClick={()=>notifOpen&&setNotifOpen(false)}>
           {content}
         </main>
         {isMobile&&(
