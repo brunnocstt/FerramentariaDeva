@@ -4,22 +4,11 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Ferramentaria Deva</title>
-  <!-- GitHub Pages não permite header HTTP real, então a meta tag é a única forma de CSP
-       disponível aqui. Não cobre tudo (ex. frame-ancestors), mas fecha script/estilo/conexão
-       a uma lista explícita em vez de deixar tudo liberado. static.cloudflareinsights.com é o
-       beacon de analytics que o próprio GitHub Pages injeta automaticamente em domínio custom
-       — inofensivo, liberado só pra não gerar erro de CSP bloqueado no console de todo usuário. -->
-  <meta http-equiv="Content-Security-Policy" content="
-    default-src 'self';
-    base-uri 'self';
-    object-src 'none';
-    script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com https://unpkg.com https://esm.sh https://challenges.cloudflare.com https://static.cloudflareinsights.com;
-    style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
-    font-src https://fonts.gstatic.com;
-    img-src 'self' data: blob: https://zdwkdfsqxkcrnkovdvba.supabase.co;
-    connect-src 'self' https://zdwkdfsqxkcrnkovdvba.supabase.co https://esm.sh https://unpkg.com https://challenges.cloudflare.com https://cloudflareinsights.com;
-    frame-src https://challenges.cloudflare.com;
-  " />
+  <!-- CSP removida em 2026-08-25: quebrou o carregamento no Safari/iPadOS ("Script error.",
+       tela de erro do error boundary) apesar de ter testado limpo em Chrome (desktop e mobile
+       emulado). Provável causa: algum script bloqueado pela política que o Safari reporta de
+       forma opaca. Não reaplicar sem antes testar num iPad/Safari de verdade — não é possível
+       simular o motor WebKit real com as ferramentas de preview disponíveis aqui. -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
