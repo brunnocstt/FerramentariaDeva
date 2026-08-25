@@ -180,8 +180,12 @@ function diasEntre(d1,d2=new Date()){
 }
 function fmtDuracao(iso){
   if(!iso)return "—";
-  const ms=Date.now()-new Date(iso).getTime();
-  if(!(ms>=0))return "agora";
+  return fmtDuracaoMs(Date.now()-new Date(iso).getTime());
+}
+// Formata um intervalo de milissegundos já calculado (usado pra durações fechadas, entre duas
+// datas, diferente do fmtDuracao acima que sempre mede "até agora").
+function fmtDuracaoMs(ms){
+  if(!(ms>=0))return "—";
   const min=Math.floor(ms/60000);
   if(min<1)return "agora";
   if(min<60)return `${min} min`;
@@ -189,6 +193,12 @@ function fmtDuracao(iso){
   if(h<24)return `${h}h${min%60?String(min%60).padStart(2,"0")+"min":""}`;
   const dias=Math.floor(h/24);
   return `${dias}d${h%24?(h%24)+"h":""}`;
+}
+// Duração entre retirada e devolução — se ainda não devolveu, mede até agora e sinaliza "aberta".
+function fmtDuracaoEntre(inicioIso,fimIso){
+  if(!inicioIso)return "—";
+  const fim=fimIso?new Date(fimIso).getTime():Date.now();
+  return fmtDuracaoMs(fim-new Date(inicioIso).getTime());
 }
 
 const STATUS_FERRAMENTA_INFO={
@@ -2775,8 +2785,323 @@ function DevolucaoColaborador({colaborador,onVoltar,onFeito}){
 /* ══════════════════════════════════════════════════════════════
    MOVIMENTAÇÕES
    ══════════════════════════════════════════════════════════════ */
-function MovimentacoesView({profile,filiais}){
+// ── Helpers de histórico/sessão de empréstimo, usados pelas abas "Por Ferramenta" e
+// "Por Mecânico" — reconstrói pares retirada→devolução a partir do log imutável de movimentações
+// (uma ferramenta de unidade não guarda isso pronto em nenhuma coluna, só o status atual).
+function pareaSessoes(movsAsc,labelFn){
+  const sessoes=[];
+  let aberta=null;
+  for(const m of movsAsc){
+    if(m.tipo==="retirada")aberta={label:labelFn(m),dataRetirada:m.data,dataDevolucao:null};
+    else if(m.tipo==="devolucao"&&aberta){aberta.dataDevolucao=m.data;sessoes.push(aberta);aberta=null;}
+  }
+  if(aberta)sessoes.push(aberta);
+  return sessoes.reverse(); // mais recente primeiro
+}
+// Uma pessoa pode estar com mais de uma ferramenta ao mesmo tempo (retiradas intercaladas),
+// então agrupa por ferramenta antes de parear — parear tudo junto embaralharia os pares errados.
+function pareaSessoesPorGrupo(movsAsc,groupKeyFn,labelFn){
+  const grupos={};
+  for(const m of movsAsc)(grupos[groupKeyFn(m)]=grupos[groupKeyFn(m)]||[]).push(m);
+  let todas=[];
+  for(const k in grupos)todas=todas.concat(pareaSessoes(grupos[k],labelFn));
+  todas.sort((a,b)=>new Date(b.dataRetirada)-new Date(a.dataRetirada));
+  return todas;
+}
+function calcularIndicadores(sessoes){
+  const fechadas=sessoes.filter(s=>s.dataDevolucao);
+  const abertas=sessoes.filter(s=>!s.dataDevolucao);
+  const tempoTotalMs=fechadas.reduce((soma,s)=>soma+(new Date(s.dataDevolucao)-new Date(s.dataRetirada)),0);
+  return{total:sessoes.length,fechadas:fechadas.length,abertas:abertas.length,tempoTotalMs,
+    tempoMedioMs:fechadas.length?tempoTotalMs/fechadas.length:0};
+}
+function TabPill({ativo,onClick,children,cor=BLUE}){
+  return(
+    <button onClick={onClick} style={{padding:"7px 14px",borderRadius:9,cursor:"pointer",fontSize:12.5,fontWeight:700,
+      border:`1.5px solid ${ativo?cor:"#E5E7EB"}`,background:ativo?`${cor}14`:"#fff",color:ativo?cor:"#6B7280"}}>
+      {children}
+    </button>
+  );
+}
+function ChipIndicador({label,valor,destaque}){
+  return(
+    <div style={{padding:"8px 14px",borderRadius:10,background:destaque?"#FFFBEB":"#F9FAFB",
+      border:`1px solid ${destaque?"#FDE68A":"#F1F5F9"}`,minWidth:130,flex:"1 1 130px"}}>
+      <div style={{fontSize:10,fontWeight:700,color:"#9CA3AF",textTransform:"uppercase",letterSpacing:".05em"}}>{label}</div>
+      <div style={{fontSize:16,fontWeight:800,color:destaque?"#B45309":"#111827",marginTop:2}}>{valor}</div>
+    </div>
+  );
+}
+function IndicadoresSessoes({ind}){
+  return(
+    <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:16}}>
+      <ChipIndicador label="Empréstimos" valor={ind.total}/>
+      <ChipIndicador label="Com a pessoa agora" valor={ind.abertas} destaque={ind.abertas>0}/>
+      <ChipIndicador label="Tempo total emprestado" valor={fmtDuracaoMs(ind.tempoTotalMs)}/>
+      <ChipIndicador label="Tempo médio por empréstimo" valor={ind.fechadas?fmtDuracaoMs(ind.tempoMedioMs):"—"}/>
+    </div>
+  );
+}
+function LinhaSessao({label,dataRetirada,dataDevolucao}){
+  const aberta=!dataDevolucao;
+  return(
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,
+      padding:"11px 14px",borderBottom:"1px solid #F8FAFC",flexWrap:"wrap"}}>
+      <div style={{minWidth:0}}>
+        <div style={{fontSize:13,fontWeight:700,color:"#111827"}}>{label}</div>
+        <div style={{fontSize:11.5,color:"#9CA3AF",marginTop:1}}>
+          {fmtDateTime(dataRetirada)} → {dataDevolucao?fmtDateTime(dataDevolucao):"ainda com a pessoa"}
+        </div>
+      </div>
+      <span style={{fontSize:11,fontWeight:700,padding:"3px 10px",borderRadius:99,whiteSpace:"nowrap",
+        background:aberta?"#FFFBEB":"#F0FDF4",color:aberta?"#B45309":"#15803D"}}>
+        {aberta?`em aberto há ${fmtDuracaoEntre(dataRetirada,null)}`:fmtDuracaoEntre(dataRetirada,dataDevolucao)}
+      </span>
+    </div>
+  );
+}
+function LinhaTransferencia({t}){
+  return(
+    <div style={{padding:"11px 14px",borderBottom:"1px solid #F8FAFC"}}>
+      <div style={{fontSize:13,fontWeight:700,color:"#111827"}}>{t.label}</div>
+      <div style={{fontSize:11.5,color:"#6B7280",marginTop:1}}>
+        {t.origem?.nome} → {t.destino?.nome}{t.solicitante?.name?` · solicitado por ${t.solicitante.name}`:""}
+      </div>
+      <div style={{fontSize:11,color:"#9CA3AF",marginTop:1}}>{fmtDateTime(t.decided_at||t.created_at)}</div>
+    </div>
+  );
+}
+
+// ── Aba "Por Ferramenta" — busca uma unidade (código/nome) ou um tipo em estoque por
+// quantidade, e mostra as sessões de empréstimo (pareadas do log de movimentações) mais o
+// histórico de transferência entre filiais daquele item específico.
+function HistoricoPorFerramentaView({profile}){
+  const[busca,setBusca]=useState("");
+  const[resultados,setResultados]=useState([]);
+  const[buscando,setBuscando]=useState(false);
+  const[selecionado,setSelecionado]=useState(null);
+  const[dados,setDados]=useState(null);
+  const[carregando,setCarregando]=useState(false);
+
+  useEffect(()=>{
+    const termo=busca.trim();
+    if(termo.length<2){setResultados([]);return;}
+    setBuscando(true);
+    const t=setTimeout(async()=>{
+      const[{data:porCodigo},{data:porNome},{data:pools}]=await Promise.all([
+        supabase.from("ferramentas_unidade").select("id,codigo,filial_id,catalogo:catalogo_id(nome),filial:filial_id(nome)")
+          .ilike("codigo",`%${termo}%`).limit(15),
+        supabase.from("ferramentas_unidade").select("id,codigo,filial_id,catalogo:catalogo_id!inner(nome),filial:filial_id(nome)")
+          .ilike("catalogo.nome",`%${termo}%`).limit(15),
+        supabase.from("ferramentas_catalogo").select("id,nome").eq("controle_individual",false).ilike("nome",`%${termo}%`).limit(10),
+      ]);
+      const vistos=new Set();
+      let unidades=[...(porCodigo||[]),...(porNome||[])].filter(u=>{
+        if(vistos.has(u.id))return false; vistos.add(u.id); return true;
+      });
+      if(profile.userType!=="admin_geral")unidades=unidades.filter(u=>profile.filialIds.includes(u.filial_id));
+      setResultados([
+        ...unidades.map(u=>({tipo:"unidade",id:u.id,label:`${u.codigo} — ${nomeLimpo(u.catalogo?.nome,u.codigo)}`,sub:u.filial?.nome})),
+        ...(pools||[]).map(c=>({tipo:"pool",id:c.id,label:c.nome,sub:"Estoque por quantidade"})),
+      ]);
+      setBuscando(false);
+    },300);
+    return()=>clearTimeout(t);
+  },[busca,profile.filialIds,profile.userType]);
+
+  async function selecionar(item){
+    setSelecionado(item);setDados(null);setCarregando(true);
+    if(item.tipo==="unidade"){
+      const[{data:movs},{data:transfs}]=await Promise.all([
+        supabase.from("movimentacoes").select("*, pessoa_responsavel:pessoa_responsavel_id(name)")
+          .eq("ferramenta_id",item.id).in("tipo",["retirada","devolucao"]).order("data",{ascending:true}),
+        supabase.from("transferencias_ferramenta")
+          .select("*, origem:filial_origem_id(nome), destino:filial_destino_id(nome), solicitante:solicitante_id(name)")
+          .eq("ferramenta_id",item.id).eq("status","aprovada").order("decided_at",{ascending:false}),
+      ]);
+      const sessoes=pareaSessoes(movs||[],m=>m.pessoa_responsavel?.name||"—");
+      setDados({sessoes,transferencias:(transfs||[]).map(t=>({...t,label:item.label}))});
+    }else{
+      let poolQuery=supabase.from("estoque_pool").select("id,filial_id,filial:filial_id(nome)").eq("catalogo_id",item.id);
+      if(profile.userType!=="admin_geral")poolQuery=poolQuery.in("filial_id",profile.filialIds);
+      const{data:pools}=await poolQuery;
+      const poolIds=(pools||[]).map(p=>p.id);
+      const filialPorPool=Object.fromEntries((pools||[]).map(p=>[p.id,p.filial?.nome]));
+      const[{data:emp},{data:transfs}]=await Promise.all([
+        poolIds.length?supabase.from("emprestimos").select("*, colaborador:colaborador_id(name)")
+          .in("estoque_id",poolIds).order("data_retirada",{ascending:false}):Promise.resolve({data:[]}),
+        supabase.from("transferencias_estoque")
+          .select("*, origem:filial_origem_id(nome), destino:filial_destino_id(nome), solicitante:solicitante_id(name)")
+          .eq("catalogo_id",item.id).eq("status","aprovada").order("decided_at",{ascending:false}),
+      ]);
+      const sessoes=(emp||[]).map(e=>({
+        label:`${e.colaborador?.name||"—"} · ${e.quantidade}× · ${filialPorPool[e.estoque_id]||""}`,
+        dataRetirada:e.data_retirada,dataDevolucao:e.data_devolucao,
+      }));
+      setDados({sessoes,transferencias:(transfs||[]).map(t=>({...t,label:`${item.label} — ${t.quantidade}×`}))});
+    }
+    setCarregando(false);
+  }
+
+  if(!selecionado)return(
+    <div style={{maxWidth:480}}>
+      <div style={{display:"flex",alignItems:"center",gap:8,border:"1.5px solid #E2E8F0",borderRadius:9,padding:"8px 12px",marginBottom:8}}>
+        <Search size={14} color="#94A3B8"/>
+        <input autoFocus placeholder="Buscar por código ou nome da ferramenta..." value={busca}
+          onChange={e=>setBusca(e.target.value)}
+          style={{border:"none",fontSize:13,color:"#374151",width:"100%",background:"transparent",outline:"none"}}/>
+      </div>
+      {buscando&&<div style={{padding:20,textAlign:"center"}}><Spinner size={16}/></div>}
+      {!buscando&&busca.trim().length>=2&&resultados.length===0&&(
+        <div style={{fontSize:12.5,color:"#9CA3AF",padding:"8px 4px"}}>Nada encontrado.</div>
+      )}
+      {resultados.length>0&&(
+        <div style={{background:"#fff",border:"1px solid #F1F5F9",borderRadius:12,overflow:"hidden"}}>
+          {resultados.map(r=>(
+            <button key={r.tipo+r.id} onClick={()=>selecionar(r)}
+              style={{width:"100%",textAlign:"left",padding:"10px 14px",border:"none",borderBottom:"1px solid #F8FAFC",
+                background:"#fff",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
+              <span style={{fontSize:13,fontWeight:600,color:"#111827"}}>{r.label}</span>
+              <span style={{fontSize:10.5,fontWeight:700,color:r.tipo==="pool"?"#7C3AED":"#94A3B8",
+                background:r.tipo==="pool"?"#F5F3FF":"#F8FAFC",padding:"2px 8px",borderRadius:99,whiteSpace:"nowrap"}}>
+                {r.tipo==="pool"?"Estoque":r.sub||"Unidade"}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+
+  return(
+    <div>
+      <button onClick={()=>{setSelecionado(null);setDados(null);setBusca("");}} style={{display:"flex",alignItems:"center",gap:6,
+        border:"none",background:"none",color:"#6B7280",fontSize:12.5,fontWeight:600,cursor:"pointer",padding:0,marginBottom:14}}>
+        <ArrowLeft size={13}/>Buscar outra ferramenta
+      </button>
+      <h3 style={{fontSize:16,fontWeight:800,color:"#111827",margin:"0 0 14px"}}>{selecionado.label}</h3>
+      {carregando?<div style={{padding:40,textAlign:"center"}}><Spinner size={18}/></div>:dados&&(<>
+        <IndicadoresSessoes ind={calcularIndicadores(dados.sessoes)}/>
+        <h4 style={{fontSize:12,fontWeight:800,color:"#374151",textTransform:"uppercase",letterSpacing:".05em",margin:"18px 0 8px"}}>Sessões de Empréstimo</h4>
+        {dados.sessoes.length===0?<EmptyState icon={History} title="Nenhum empréstimo registrado"/>:(
+          <div style={{background:"#fff",border:"1px solid #F1F5F9",borderRadius:14,overflow:"hidden"}}>
+            {dados.sessoes.map((s,i)=><LinhaSessao key={i} {...s}/>)}
+          </div>
+        )}
+        <h4 style={{fontSize:12,fontWeight:800,color:"#374151",textTransform:"uppercase",letterSpacing:".05em",margin:"18px 0 8px"}}>Transferências entre Filiais</h4>
+        {dados.transferencias.length===0?<EmptyState icon={ArrowLeftRight} title="Nenhuma transferência registrada"/>:(
+          <div style={{background:"#fff",border:"1px solid #F1F5F9",borderRadius:14,overflow:"hidden"}}>
+            {dados.transferencias.map(t=><LinhaTransferencia key={t.id} t={t}/>)}
+          </div>
+        )}
+      </>)}
+    </div>
+  );
+}
+
+// ── Aba "Por Mecânico" — busca um colaborador (nome/matrícula) e mostra tudo que ele já pegou
+// emprestado (unidades + estoque por quantidade, juntos numa linha do tempo só) e as
+// transferências entre filiais que ele solicitou.
+function HistoricoPorMecanicoView({profile,pessoas}){
+  const[busca,setBusca]=useState("");
+  const[selecionado,setSelecionado]=useState(null);
+  const[dados,setDados]=useState(null);
+  const[carregando,setCarregando]=useState(false);
+
+  const pessoasPermitidas=useMemo(()=>
+    profile.userType==="admin_geral"?pessoas:(pessoas||[]).filter(p=>profile.filialIds.includes(p.filial_id))
+  ,[pessoas,profile.filialIds,profile.userType]);
+
+  const resultados=useMemo(()=>{
+    const termo=busca.trim().toLowerCase();
+    if(termo.length<2)return[];
+    return pessoasPermitidas.filter(p=>p.name?.toLowerCase().includes(termo)||p.matricula?.includes(termo)).slice(0,15);
+  },[busca,pessoasPermitidas]);
+
+  async function selecionar(p){
+    setSelecionado(p);setDados(null);setCarregando(true);
+    const[{data:movs},{data:emp},{data:transfF},{data:transfE}]=await Promise.all([
+      supabase.from("movimentacoes").select("*, ferramenta:ferramenta_id(codigo,catalogo:catalogo_id(nome))")
+        .eq("pessoa_responsavel_id",p.id).in("tipo",["retirada","devolucao"]).order("data",{ascending:true}),
+      supabase.from("emprestimos").select("*, estoque:estoque_id(catalogo:catalogo_id(nome), filial:filial_id(nome))")
+        .eq("colaborador_id",p.id).order("data_retirada",{ascending:false}),
+      supabase.from("transferencias_ferramenta")
+        .select("*, ferramenta:ferramenta_id(codigo,catalogo:catalogo_id(nome)), origem:filial_origem_id(nome), destino:filial_destino_id(nome)")
+        .eq("solicitante_id",p.id).order("created_at",{ascending:false}),
+      supabase.from("transferencias_estoque")
+        .select("*, catalogo:catalogo_id(nome), origem:filial_origem_id(nome), destino:filial_destino_id(nome)")
+        .eq("solicitante_id",p.id).order("created_at",{ascending:false}),
+    ]);
+    const sessoesUnidade=pareaSessoesPorGrupo(movs||[],m=>m.ferramenta_id,
+      m=>`${m.ferramenta?.codigo} — ${nomeLimpo(m.ferramenta?.catalogo?.nome,m.ferramenta?.codigo)}`);
+    const sessoesPool=(emp||[]).map(e=>({
+      label:`${e.estoque?.catalogo?.nome||"—"} · ${e.quantidade}× · ${e.estoque?.filial?.nome||""}`,
+      dataRetirada:e.data_retirada,dataDevolucao:e.data_devolucao,
+    }));
+    const sessoes=[...sessoesUnidade,...sessoesPool].sort((a,b)=>new Date(b.dataRetirada)-new Date(a.dataRetirada));
+    const transferencias=[
+      ...(transfF||[]).map(t=>({...t,label:`${t.ferramenta?.codigo} — ${nomeLimpo(t.ferramenta?.catalogo?.nome,t.ferramenta?.codigo)}`,solicitante:{name:p.name}})),
+      ...(transfE||[]).map(t=>({...t,label:`${t.catalogo?.nome||"—"} — ${t.quantidade}×`,solicitante:{name:p.name}})),
+    ].sort((a,b)=>new Date(b.decided_at||b.created_at)-new Date(a.decided_at||a.created_at));
+    setDados({sessoes,transferencias});
+    setCarregando(false);
+  }
+
+  if(!selecionado)return(
+    <div style={{maxWidth:480}}>
+      <div style={{display:"flex",alignItems:"center",gap:8,border:"1.5px solid #E2E8F0",borderRadius:9,padding:"8px 12px",marginBottom:8}}>
+        <Search size={14} color="#94A3B8"/>
+        <input autoFocus placeholder="Buscar por nome ou matrícula..." value={busca}
+          onChange={e=>setBusca(e.target.value)}
+          style={{border:"none",fontSize:13,color:"#374151",width:"100%",background:"transparent",outline:"none"}}/>
+      </div>
+      {busca.trim().length>=2&&resultados.length===0&&(
+        <div style={{fontSize:12.5,color:"#9CA3AF",padding:"8px 4px"}}>Nada encontrado.</div>
+      )}
+      {resultados.length>0&&(
+        <div style={{background:"#fff",border:"1px solid #F1F5F9",borderRadius:12,overflow:"hidden"}}>
+          {resultados.map(p=>(
+            <button key={p.id} onClick={()=>selecionar(p)}
+              style={{width:"100%",textAlign:"left",padding:"10px 14px",border:"none",borderBottom:"1px solid #F8FAFC",
+                background:"#fff",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
+              <span style={{fontSize:13,fontWeight:600,color:"#111827"}}>{p.name}</span>
+              <span style={{fontSize:11,color:"#94A3B8"}}>{p.matricula?`Matrícula ${p.matricula}`:""}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+
+  return(
+    <div>
+      <button onClick={()=>{setSelecionado(null);setDados(null);setBusca("");}} style={{display:"flex",alignItems:"center",gap:6,
+        border:"none",background:"none",color:"#6B7280",fontSize:12.5,fontWeight:600,cursor:"pointer",padding:0,marginBottom:14}}>
+        <ArrowLeft size={13}/>Buscar outro mecânico
+      </button>
+      <h3 style={{fontSize:16,fontWeight:800,color:"#111827",margin:"0 0 14px"}}>{selecionado.name}</h3>
+      {carregando?<div style={{padding:40,textAlign:"center"}}><Spinner size={18}/></div>:dados&&(<>
+        <IndicadoresSessoes ind={calcularIndicadores(dados.sessoes)}/>
+        <h4 style={{fontSize:12,fontWeight:800,color:"#374151",textTransform:"uppercase",letterSpacing:".05em",margin:"18px 0 8px"}}>Sessões de Empréstimo</h4>
+        {dados.sessoes.length===0?<EmptyState icon={History} title="Nenhum empréstimo registrado"/>:(
+          <div style={{background:"#fff",border:"1px solid #F1F5F9",borderRadius:14,overflow:"hidden"}}>
+            {dados.sessoes.map((s,i)=><LinhaSessao key={i} {...s}/>)}
+          </div>
+        )}
+        <h4 style={{fontSize:12,fontWeight:800,color:"#374151",textTransform:"uppercase",letterSpacing:".05em",margin:"18px 0 8px"}}>Transferências Solicitadas entre Filiais</h4>
+        {dados.transferencias.length===0?<EmptyState icon={ArrowLeftRight} title="Nenhuma transferência registrada"/>:(
+          <div style={{background:"#fff",border:"1px solid #F1F5F9",borderRadius:14,overflow:"hidden"}}>
+            {dados.transferencias.map(t=><LinhaTransferencia key={t.id} t={t}/>)}
+          </div>
+        )}
+      </>)}
+    </div>
+  );
+}
+
+function MovimentacoesView({profile,filiais,pessoas}){
   const isMobile=useIsMobile();
+  const[aba,setAba]=useState("tudo"); // "tudo" | "ferramenta" | "mecanico"
   const[lista,setLista]=useState([]);
   const[loading,setLoading]=useState(true);
   const[filtroTipo,setFiltroTipo]=useState("");
@@ -2794,7 +3119,7 @@ function MovimentacoesView({profile,filiais}){
     }
     setLoading(false);
   }
-  useEffect(()=>{load();},[filtroTipo,profile.filialIds]);
+  useEffect(()=>{if(aba==="tudo")load();},[filtroTipo,profile.filialIds,aba]);
 
   function exportar(){
     const rows=lista.map(m=>({
@@ -2812,38 +3137,48 @@ function MovimentacoesView({profile,filiais}){
 
   return(
     <div className="fade" style={{padding:isMobile?"20px 16px":"28px 32px"}}>
-      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:20,flexWrap:"wrap",gap:12}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16,flexWrap:"wrap",gap:12}}>
         <div>
           <h1 style={{fontSize:22,fontWeight:800,color:"#111827",margin:"0 0 4px"}}>Movimentações</h1>
           <p style={{fontSize:13,color:"#6B7280",margin:0}}>Histórico completo de ações — registro imutável.</p>
         </div>
-        <BtnSecondary onClick={exportar}><FileSpreadsheet size={14}/>Exportar Excel</BtnSecondary>
+        {aba==="tudo"&&<BtnSecondary onClick={exportar}><FileSpreadsheet size={14}/>Exportar Excel</BtnSecondary>}
       </div>
-      <select value={filtroTipo} onChange={e=>setFiltroTipo(e.target.value)} style={{...inputStyle,width:"auto",marginBottom:18}}>
-        <option value="">Todos os tipos</option>
-        {Object.entries(TIPO_MOV_LABEL).map(([k,v])=><option key={k} value={k}>{v}</option>)}
-      </select>
-      {loading?<div style={{padding:60,textAlign:"center"}}><Spinner size={20}/></div>:
-      lista.length===0?<EmptyState icon={ArrowLeftRight} title="Nenhuma movimentação encontrada"/>:(
-        <div style={{display:"flex",flexDirection:"column",gap:0,background:"#fff",border:"1px solid #F1F5F9",borderRadius:16,overflow:"hidden"}}>
-          {lista.map(m=>(
-            <div key={m.id} style={{display:"flex",gap:12,padding:"14px 18px",borderBottom:"1px solid #F8FAFC"}}>
-              <History size={16} color="#9CA3AF" style={{marginTop:2,flexShrink:0}}/>
-              <div style={{minWidth:0,flex:1}}>
-                <div style={{display:"flex",flexWrap:"wrap",gap:8,alignItems:"center"}}>
-                  <span style={{fontSize:13,fontWeight:700,color:"#111827"}}>{TIPO_MOV_LABEL[m.tipo]||m.tipo}</span>
-                  <span style={{fontSize:12,color:"#6B7280"}}>{m.ferramenta?.codigo} — {nomeLimpo(m.ferramenta?.catalogo?.nome,m.ferramenta?.codigo)}</span>
+
+      <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"}}>
+        <TabPill ativo={aba==="tudo"} onClick={()=>setAba("tudo")}>Tudo</TabPill>
+        <TabPill ativo={aba==="ferramenta"} onClick={()=>setAba("ferramenta")}>Por Ferramenta</TabPill>
+        <TabPill ativo={aba==="mecanico"} onClick={()=>setAba("mecanico")}>Por Mecânico</TabPill>
+      </div>
+
+      {aba==="ferramenta"?<HistoricoPorFerramentaView profile={profile}/>:
+      aba==="mecanico"?<HistoricoPorMecanicoView profile={profile} pessoas={pessoas}/>:(<>
+        <select value={filtroTipo} onChange={e=>setFiltroTipo(e.target.value)} style={{...inputStyle,width:"auto",marginBottom:18}}>
+          <option value="">Todos os tipos</option>
+          {Object.entries(TIPO_MOV_LABEL).map(([k,v])=><option key={k} value={k}>{v}</option>)}
+        </select>
+        {loading?<div style={{padding:60,textAlign:"center"}}><Spinner size={20}/></div>:
+        lista.length===0?<EmptyState icon={ArrowLeftRight} title="Nenhuma movimentação encontrada"/>:(
+          <div style={{display:"flex",flexDirection:"column",gap:0,background:"#fff",border:"1px solid #F1F5F9",borderRadius:16,overflow:"hidden"}}>
+            {lista.map(m=>(
+              <div key={m.id} style={{display:"flex",gap:12,padding:"14px 18px",borderBottom:"1px solid #F8FAFC"}}>
+                <History size={16} color="#9CA3AF" style={{marginTop:2,flexShrink:0}}/>
+                <div style={{minWidth:0,flex:1}}>
+                  <div style={{display:"flex",flexWrap:"wrap",gap:8,alignItems:"center"}}>
+                    <span style={{fontSize:13,fontWeight:700,color:"#111827"}}>{TIPO_MOV_LABEL[m.tipo]||m.tipo}</span>
+                    <span style={{fontSize:12,color:"#6B7280"}}>{m.ferramenta?.codigo} — {nomeLimpo(m.ferramenta?.catalogo?.nome,m.ferramenta?.codigo)}</span>
+                  </div>
+                  <div style={{fontSize:11.5,color:"#9CA3AF",marginTop:2}}>
+                    {fmtDateTime(m.data)} · por {m.registrado_por_profile?.name||"—"}
+                    {m.pessoa_responsavel?.name?` · com ${m.pessoa_responsavel.name}`:""}
+                  </div>
+                  {m.observacao&&<div style={{fontSize:12.5,color:"#374151",marginTop:4}}>{m.observacao}</div>}
                 </div>
-                <div style={{fontSize:11.5,color:"#9CA3AF",marginTop:2}}>
-                  {fmtDateTime(m.data)} · por {m.registrado_por_profile?.name||"—"}
-                  {m.pessoa_responsavel?.name?` · com ${m.pessoa_responsavel.name}`:""}
-                </div>
-                {m.observacao&&<div style={{fontSize:12.5,color:"#374151",marginTop:4}}>{m.observacao}</div>}
               </div>
-            </div>
-          ))}
-        </div>
-      )}
+            ))}
+          </div>
+        )}
+      </>)}
     </div>
   );
 }
