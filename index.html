@@ -4397,7 +4397,10 @@ function ConfiguracoesView({profile,filiais,categorias,pessoas,reloadFiliais,rel
         <p style={{fontSize:13,color:"#9CA3AF",marginTop:3}}>Gerencie configurações do sistema</p>
       </div>
 
-      <div style={{display:"flex",gap:isMobile?14:20,alignItems:"flex-start",flexDirection:isMobile?"column":"row"}}>
+      {/* alignItems controla o eixo cruzado do flex — que é a LARGURA quando a direção vira
+          coluna no mobile. "flex-start" (bom no desktop, lado a lado) faz o conteúdo encolher
+          pra largura do próprio texto em vez de ocupar a tela toda quando empilhado. */}
+      <div style={{display:"flex",gap:isMobile?14:20,alignItems:isMobile?"stretch":"flex-start",flexDirection:isMobile?"column":"row"}}>
 
         {SECTIONS.length>1&&(
         <div style={isMobile
