@@ -2230,13 +2230,18 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
 
       <div style={{marginBottom:18}}>
         <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-end"}}>
-          <Field label="Buscar">
-            <div style={{position:"relative",minWidth:220}}>
-              <Search size={14} color="#9CA3AF" style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)"}}/>
-              <input value={busca} onChange={e=>setBusca(e.target.value)} placeholder="Código ou nome..."
-                style={{...inputStyle,paddingLeft:34}}/>
-            </div>
-          </Field>
+          {/* flex:1 pra puxar o espaço sobrando na linha — Filtros e Exportar têm largura fixa
+              (flexShrink:0 já vem do BtnSecondary), então a busca cresce até o limite que ainda
+              deixa os dois na mesma linha, em vez de ficar pequena com espaço vazio ao lado. */}
+          <div style={{flex:"1 1 200px",minWidth:200}}>
+            <Field label="Buscar">
+              <div style={{position:"relative",width:"100%"}}>
+                <Search size={14} color="#9CA3AF" style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)"}}/>
+                <input value={busca} onChange={e=>setBusca(e.target.value)} placeholder="Código ou nome..."
+                  style={{...inputStyle,paddingLeft:34,width:"100%"}}/>
+              </div>
+            </Field>
+          </div>
           <BtnSecondary onClick={()=>setFiltrosModalAberto(true)}>
             <Filter size={14}/>Filtros
             {filtrosAtivos>0&&<span style={{marginLeft:2,fontSize:10.5,fontWeight:800,color:"#fff",background:BLUE,
@@ -4723,7 +4728,6 @@ function App(){
   const[configSection,setConfigSection]=useState("perfil");
   const[notifications,setNotifications]=useState([]);
   const[notifOpen,setNotifOpen]=useState(false);
-  const[viewingProfile,setViewingProfile]=useState(false);
   const isMobile=useIsMobile();
 
   async function loadFiliais(){
@@ -4801,25 +4805,20 @@ function App(){
   };
 
   const commonProps={profile,filiais,categorias,catalogos,pessoas};
+  // "Meu Perfil" é só mais uma seção de Configurações — não existe mais uma tela separada só
+  // pra isso. Clicar no avatar leva pra Configurações já com essa seção selecionada, em vez de
+  // abrir um "outro lugar" que mostra a mesma coisa (era exatamente essa a confusão reportada).
+  function abrirMeuPerfil(){ setActiveNav("configuracoes"); setConfigSection("perfil"); }
+
   let content=null;
-  if(viewingProfile){
-    content=<div style={{padding:isMobile?"20px 16px":"28px 32px"}}>
-      <button onClick={()=>setViewingProfile(false)} style={{display:"flex",alignItems:"center",gap:6,border:"none",
-        background:"none",color:"#6B7280",fontSize:13,fontWeight:600,cursor:"pointer",padding:0,marginBottom:16}}>
-        <ArrowLeft size={14}/>Voltar
-      </button>
-      <MeuPerfilCard profile={profile} onAvatarChanged={handleAvatarChanged}/>
-    </div>;
-  }else{
-    switch(activeNav){
-      case "dashboard": content=<DashboardView {...commonProps}/>; break;
-      case "ferramentas": content=<FerramentasView {...commonProps} reloadCatalogos={loadCatalogos}/>; break;
-      case "movimentacoes": content=<MovimentacoesView {...commonProps}/>; break;
-      case "relatorios": content=<RelatoriosView {...commonProps}/>; break;
-      case "configuracoes": content=<ConfiguracoesView {...commonProps} reloadFiliais={loadFiliais} reloadCategorias={loadCategorias}
-        activeSection={configSection} setActiveSection={setConfigSection} onAvatarChanged={handleAvatarChanged}/>; break;
-      default: content=null;
-    }
+  switch(activeNav){
+    case "dashboard": content=<DashboardView {...commonProps}/>; break;
+    case "ferramentas": content=<FerramentasView {...commonProps} reloadCatalogos={loadCatalogos}/>; break;
+    case "movimentacoes": content=<MovimentacoesView {...commonProps}/>; break;
+    case "relatorios": content=<RelatoriosView {...commonProps}/>; break;
+    case "configuracoes": content=<ConfiguracoesView {...commonProps} reloadFiliais={loadFiliais} reloadCategorias={loadCategorias}
+      activeSection={configSection} setActiveSection={setConfigSection} onAvatarChanged={handleAvatarChanged}/>; break;
+    default: content=null;
   }
 
   const unreadCount=notifications.filter(n=>!n.is_read).length;
@@ -4829,8 +4828,8 @@ function App(){
       {/* Menu lateral: só no desktop (largura ≥768 e não é tablet em pé). Em celular/tablet
           em pé, a navegação vira a barra fixa no rodapé (MobileBottomNav), abaixo. */}
       {!isMobile&&(
-        <Sidebar currentUser={profile} activeNav={activeNav} setActiveNav={id=>{setActiveNav(id);setViewingProfile(false);}}
-          onLogout={handleLogout} onViewProfile={()=>setViewingProfile(true)}
+        <Sidebar currentUser={profile} activeNav={activeNav} setActiveNav={setActiveNav}
+          onLogout={handleLogout} onViewProfile={abrirMeuPerfil}
           notifications={notifications} notifOpen={notifOpen} onNotifToggle={()=>setNotifOpen(v=>!v)}
           markNotifRead={markNotifRead} markAllNotifRead={markAllNotifRead}/>
       )}
@@ -4861,7 +4860,7 @@ function App(){
               )}
             </div>
             <MobileHeaderAvatar currentUser={profile}
-              onViewProfile={()=>setViewingProfile(true)} onLogout={handleLogout}/>
+              onViewProfile={abrirMeuPerfil} onLogout={handleLogout}/>
           </div>
         )}
         <main style={{flex:1,overflowY:"auto",minWidth:0,minHeight:0,overflowAnchor:"none",
@@ -4871,8 +4870,7 @@ function App(){
         </main>
         {isMobile&&(
           <MobileBottomNav items={navItemsFor(profile.userType)}
-            activeNav={viewingProfile?null:activeNav}
-            setActiveNav={id=>{setActiveNav(id);setViewingProfile(false);}}/>
+            activeNav={activeNav} setActiveNav={setActiveNav}/>
         )}
       </div>
     </div>
