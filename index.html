@@ -20,6 +20,11 @@
   <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
   <style>
     html,body{height:100%;margin:0;padding:0;}
+    /* 100vh no Safari mobile/iPadOS conta a área que a barra do navegador some/aparece,
+       então o app ficava "mais alto" do que a tela visível de verdade — o rodapé (barra de
+       navegação mobile) acabava saindo do lugar certo. 100dvh é a altura visível real; o
+       100vh antes dela é só fallback pra navegador que não suporta dvh. */
+    .app-shell{height:100vh;height:100dvh;}
     *{font-family:"Plus Jakarta Sans",system-ui,sans-serif;box-sizing:border-box;}
     ::-webkit-scrollbar{width:5px;height:5px;}
     ::-webkit-scrollbar-track{background:transparent;}
@@ -4175,7 +4180,7 @@ function App(){
   const unreadCount=notifications.filter(n=>!n.is_read).length;
 
   return(
-    <div style={{height:"100vh",display:"flex",background:"#F8FAFC"}}>
+    <div className="app-shell" style={{display:"flex",background:"#F8FAFC"}}>
       {/* Menu lateral: só no desktop (largura ≥768 e não é tablet em pé). Em celular/tablet
           em pé, a navegação vira a barra fixa no rodapé (MobileBottomNav), abaixo. */}
       {!isMobile&&(
