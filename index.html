@@ -2059,9 +2059,13 @@ function FiltrosEstoqueCampos({filtroStatus,setFiltroStatus,filtroFilial,setFilt
   );
 }
 function ModalFiltrosEstoque({onClose,onLimpar,...campos}){
+  const temFiltros=!!(campos.filtroStatus||campos.filtroFilial||campos.filtroCategoria||campos.filtroObrigatoria);
   return(
     <Modal title="Filtros" onClose={onClose} width={380}
-      footer={<><BtnSecondary onClick={onLimpar}>Limpar filtros</BtnSecondary><BtnPrimary onClick={onClose}>Aplicar</BtnPrimary></>}>
+      footer={<>
+        <BtnSecondary onClick={onLimpar} disabled={!temFiltros}>Remover todos os filtros</BtnSecondary>
+        <BtnPrimary onClick={onClose}>Aplicar</BtnPrimary>
+      </>}>
       <div style={{display:"flex",flexDirection:"column",gap:14}}>
         <FiltrosEstoqueCampos {...campos} selectWidth="100%"/>
       </div>
@@ -2087,31 +2091,10 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
   const[devolucaoAberta,setDevolucaoAberta]=useState(false);
   const[exportarAberto,setExportarAberto]=useState(false);
   const[filtrosModalAberto,setFiltrosModalAberto]=useState(false);
-  const[filtrosCompacto,setFiltrosCompacto]=useState(false);
   const isAdmin=profile.userType==="admin_geral"||profile.userType==="admin_area";
   const mostrarFiltroFilial=profile.userType==="admin_geral"||profile.filiaisAcesso.length>1;
   const filiaisOpcoesFiltro=profile.userType==="admin_geral"?filiais:profile.filiaisAcesso;
   const filtrosAtivos=[filtroStatus,filtroFilial,filtroCategoria,filtroObrigatoria].filter(Boolean).length;
-
-  // Mede se a barra de busca+filtros+exportar cabe numa linha só (em vez de chutar um
-  // breakpoint de largura) — um medidor invisível com nowrap fica sobreposto por cima,
-  // reportando a largura "natural" do conteúdo; se ela estourar a largura real disponível
-  // da barra, os filtros viram um botão único que abre modal. Reage a resize da janela e
-  // também da própria barra (ex.: recolher/expandir a sidebar), nos dois sentidos.
-  const barraFiltrosRef=useRef(null);
-  const medidorFiltrosRef=useRef(null);
-  useEffect(()=>{
-    if(isMobile){setFiltrosCompacto(false);return;}
-    function medir(){
-      if(!barraFiltrosRef.current||!medidorFiltrosRef.current)return;
-      setFiltrosCompacto(medidorFiltrosRef.current.scrollWidth>barraFiltrosRef.current.clientWidth);
-    }
-    medir();
-    const ro=new ResizeObserver(medir);
-    ro.observe(barraFiltrosRef.current);
-    window.addEventListener("resize",medir);
-    return()=>{ro.disconnect();window.removeEventListener("resize",medir);};
-  },[isMobile,mostrarFiltroFilial,categorias.length]);
 
   async function load(){
     setLoading(true);
@@ -2245,22 +2228,7 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
 
       <TransferenciasPendentesPanel profile={profile} onChanged={load}/>
 
-      <div ref={barraFiltrosRef} style={{position:"relative",marginBottom:18}}>
-        {/* medidor invisível: mesma barra "cheia" (sem quebrar linha), só pra descobrir se caberia */}
-        {!isMobile&&(
-          <div ref={medidorFiltrosRef} aria-hidden="true" style={{position:"absolute",top:0,left:0,
-            visibility:"hidden",pointerEvents:"none",zIndex:-1,display:"flex",gap:10,flexWrap:"nowrap",alignItems:"flex-end"}}>
-            <Field label="Buscar"><div style={{width:220,height:1}}/></Field>
-            <FiltrosEstoqueCampos filtroStatus={filtroStatus} setFiltroStatus={setFiltroStatus}
-              filtroFilial={filtroFilial} setFiltroFilial={setFiltroFilial} mostrarFilial={mostrarFiltroFilial}
-              filiaisOpcoes={filiaisOpcoesFiltro} filtroCategoria={filtroCategoria} setFiltroCategoria={setFiltroCategoria}
-              categorias={categorias} filtroObrigatoria={filtroObrigatoria} setFiltroObrigatoria={setFiltroObrigatoria}/>
-            <div style={{display:"flex",gap:8}}>
-              <BtnSecondary><FileSpreadsheet size={14}/>Exportar Excel</BtnSecondary>
-              <BtnSecondary><FileText size={14}/>Exportar PDF</BtnSecondary>
-            </div>
-          </div>
-        )}
+      <div style={{marginBottom:18}}>
         <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-end"}}>
           <Field label="Buscar">
             <div style={{position:"relative",minWidth:220}}>
@@ -2269,18 +2237,11 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
                 style={{...inputStyle,paddingLeft:34}}/>
             </div>
           </Field>
-          {filtrosCompacto?(
-            <BtnSecondary onClick={()=>setFiltrosModalAberto(true)}>
-              <Filter size={14}/>Filtros
-              {filtrosAtivos>0&&<span style={{marginLeft:2,fontSize:10.5,fontWeight:800,color:"#fff",background:BLUE,
-                borderRadius:99,padding:"1px 6px"}}>{filtrosAtivos}</span>}
-            </BtnSecondary>
-          ):(
-            <FiltrosEstoqueCampos filtroStatus={filtroStatus} setFiltroStatus={setFiltroStatus}
-              filtroFilial={filtroFilial} setFiltroFilial={setFiltroFilial} mostrarFilial={mostrarFiltroFilial}
-              filiaisOpcoes={filiaisOpcoesFiltro} filtroCategoria={filtroCategoria} setFiltroCategoria={setFiltroCategoria}
-              categorias={categorias} filtroObrigatoria={filtroObrigatoria} setFiltroObrigatoria={setFiltroObrigatoria}/>
-          )}
+          <BtnSecondary onClick={()=>setFiltrosModalAberto(true)}>
+            <Filter size={14}/>Filtros
+            {filtrosAtivos>0&&<span style={{marginLeft:2,fontSize:10.5,fontWeight:800,color:"#fff",background:BLUE,
+              borderRadius:99,padding:"1px 6px"}}>{filtrosAtivos}</span>}
+          </BtnSecondary>
           {isMobile?(
             <BtnSecondary onClick={()=>setExportarAberto(true)}><Download size={14}/>Exportar</BtnSecondary>
           ):(
