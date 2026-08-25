@@ -1333,12 +1333,13 @@ function traduzErro(err){
 function ModalAcao({ferramenta,tipo,onClose,onDone,pessoasFilial}){
   const[pessoaId,setPessoaId]=useState("");
   const[observacao,setObservacao]=useState("");
+  const[condicao,setCondicao]=useState(null);
   const[loading,setLoading]=useState(false);
   const[error,setError]=useState("");
 
   const CONFIG={
     retirada:{title:"Registrar Retirada",needsPessoa:true,confirmLabel:"Confirmar Retirada"},
-    devolucao:{title:"Registrar Devolução",needsPessoa:false,confirmLabel:"Confirmar Devolução"},
+    devolucao:{title:"Registrar Devolução",needsPessoa:false,needsCondicao:true,confirmLabel:"Confirmar Devolução"},
     envio_afericao:{title:"Enviar para Aferição",needsPessoa:false,confirmLabel:"Confirmar Envio"},
     retorno_afericao:{title:"Registrar Retorno da Aferição",needsPessoa:false,confirmLabel:"Confirmar Retorno"},
     extravio:{title:"Reportar Extravio",needsPessoa:false,confirmLabel:"Reportar Extravio",danger:true},
@@ -1348,10 +1349,12 @@ function ModalAcao({ferramenta,tipo,onClose,onDone,pessoasFilial}){
 
   async function confirmar(){
     if(CONFIG.needsPessoa&&!pessoaId){setError("Selecione com quem a ferramenta vai ficar.");return;}
+    if(CONFIG.needsCondicao&&!condicao){setError("Escolha a condição da ferramenta antes de confirmar.");return;}
     setLoading(true);setError("");
     const{error:err}=await supabase.from("movimentacoes").insert({
       ferramenta_id:ferramenta.id,tipo,
       pessoa_responsavel_id:CONFIG.needsPessoa?pessoaId:null,
+      condicao:CONFIG.needsCondicao?condicao:null,
       observacao:observacao||null,
     });
     setLoading(false);
@@ -1377,6 +1380,11 @@ function ModalAcao({ferramenta,tipo,onClose,onDone,pessoasFilial}){
               <option value="">Selecione...</option>
               {pessoasFilial.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
+          </Field>
+        )}
+        {CONFIG.needsCondicao&&(
+          <Field label="Condição da ferramenta" required>
+            <SeletorCondicao value={condicao} onChange={setCondicao}/>
           </Field>
         )}
         <Field label="Observação (opcional)">
@@ -2681,11 +2689,37 @@ function RetiradaColaborador({colaborador,onVoltar,onFeito}){
   );
 }
 
+const CONDICAO_INFO={
+  bom_estado:{label:"Bom Estado",color:"#059669",bg:"#ECFDF5",border:"#A7F3D0"},
+  parcialmente_danificada:{label:"Parcialmente Danificada",color:"#D97706",bg:"#FFFBEB",border:"#FDE68A"},
+  totalmente_danificada:{label:"Totalmente Danificada",color:"#B91C1C",bg:"#FEF2F2",border:"#FECACA"},
+};
+// Seletor de condição — obrigatório em toda devolução (pedido explícito do usuário), reforçado
+// também no banco (a devolução é rejeitada sem isso, mesmo pulando essa tela).
+function SeletorCondicao({value,onChange}){
+  return(
+    <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}} onClick={e=>e.stopPropagation()}>
+      {Object.entries(CONDICAO_INFO).map(([k,info])=>{
+        const ativo=value===k;
+        return(
+          <button key={k} type="button" onClick={()=>onChange(k)}
+            style={{padding:"5px 11px",borderRadius:99,cursor:"pointer",fontSize:11.5,fontWeight:700,
+              border:`1.5px solid ${ativo?info.color:"#E5E7EB"}`,background:ativo?info.bg:"#fff",
+              color:ativo?info.color:"#6B7280"}}>
+            {info.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function DevolucaoColaborador({colaborador,onVoltar,onFeito}){
   const[unidades,setUnidades]=useState([]);
   const[emprestimos,setEmprestimos]=useState([]);
   const[loading,setLoading]=useState(true);
   const[selecionados,setSelecionados]=useState(()=>new Set());
+  const[condicoes,setCondicoes]=useState({});
   const[salvando,setSalvando]=useState(false);
   const[error,setError]=useState("");
   const[feitos,setFeitos]=useState([]);
@@ -2701,6 +2735,7 @@ function DevolucaoColaborador({colaborador,onVoltar,onFeito}){
     setUnidades(dU||[]);
     setEmprestimos(dE||[]);
     setSelecionados(new Set());
+    setCondicoes({});
     setLoading(false);
   }
   useEffect(()=>{load();},[colaborador.id]);
@@ -2714,17 +2749,23 @@ function DevolucaoColaborador({colaborador,onVoltar,onFeito}){
   }
 
   async function confirmarDevolucao(){
-    setSalvando(true);setError("");
+    setError("");
+    const faltando=[...selecionados].filter(key=>!condicoes[key]);
+    if(faltando.length>0){setError("Escolha a condição de cada ferramenta marcada antes de confirmar.");return;}
+    setSalvando(true);
     const novosFeitos=[];
     for(const u of unidades){
-      if(!selecionados.has("u-"+u.id))continue;
-      const{error:err}=await supabase.from("movimentacoes").insert({ferramenta_id:u.id,tipo:"devolucao"});
+      const key="u-"+u.id;
+      if(!selecionados.has(key))continue;
+      const{error:err}=await supabase.from("movimentacoes").insert({ferramenta_id:u.id,tipo:"devolucao",condicao:condicoes[key]});
       if(err){setError(`Não foi possível devolver ${u.codigo}: ${err.message||""}`);setSalvando(false);load();onFeito?.();return;}
       novosFeitos.push(`${u.codigo} — ${nomeLimpo(u.catalogo?.nome,u.codigo)}`);
     }
     for(const e of emprestimos){
-      if(!selecionados.has("e-"+e.id))continue;
-      const{error:err}=await supabase.from("emprestimos").update({data_devolucao:new Date().toISOString()}).eq("id",e.id);
+      const key="e-"+e.id;
+      if(!selecionados.has(key))continue;
+      const{error:err}=await supabase.from("emprestimos")
+        .update({data_devolucao:new Date().toISOString(),condicao_devolucao:condicoes[key]}).eq("id",e.id);
       if(err){setError(`Não foi possível devolver ${e.estoque?.catalogo?.nome}: ${err.message||""}`);setSalvando(false);load();onFeito?.();return;}
       novosFeitos.push(`${e.quantidade}x ${e.estoque?.catalogo?.nome}`);
     }
@@ -2756,32 +2797,40 @@ function DevolucaoColaborador({colaborador,onVoltar,onFeito}){
       {loading?<div style={{padding:40,textAlign:"center"}}><Spinner size={20}/></div>:
       nada?<EmptyState icon={PackageCheck} title="Nada emprestado com esse colaborador no momento"/>:(
         <>
-        <p style={{fontSize:12,color:"#9CA3AF",margin:"0 0 10px"}}>Marque uma ou mais ferramentas e confirme a devolução.</p>
+        <p style={{fontSize:12,color:"#9CA3AF",margin:"0 0 10px"}}>
+          Marque uma ou mais ferramentas, escolha a condição de cada uma e confirme a devolução.
+        </p>
         <div style={{display:"flex",flexDirection:"column",gap:8}}>
           {unidades.map(u=>{
             const key="u-"+u.id, checked=selecionados.has(key);
             return(
-              <label key={key} style={{display:"flex",alignItems:"center",gap:10,padding:"11px 14px",cursor:"pointer",
+              <label key={key} style={{display:"flex",flexDirection:"column",padding:"11px 14px",cursor:"pointer",
                 background:checked?"#EEF2FF":"#fff",border:`1.5px solid ${checked?BLUE:"#F1F5F9"}`,borderRadius:10}}>
-                <input type="checkbox" checked={checked} onChange={()=>toggle(key)} style={{width:16,height:16,flexShrink:0}}/>
-                <div style={{flex:1,minWidth:0}}>
-                  <div style={{fontSize:10.5,color:"#9CA3AF",fontWeight:700,textTransform:"uppercase",letterSpacing:".3px"}}>{u.codigo}</div>
-                  <div style={{fontSize:14,fontWeight:700,color:"#111827",marginTop:1}}>{nomeLimpo(u.catalogo?.nome,u.codigo)}</div>
-                  <div style={{fontSize:11,color:"#9CA3AF",marginTop:2}}>Desde {fmtDateTime(u.data_retirada_atual)}</div>
+                <div style={{display:"flex",alignItems:"center",gap:10}}>
+                  <input type="checkbox" checked={checked} onChange={()=>toggle(key)} style={{width:16,height:16,flexShrink:0}}/>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:10.5,color:"#9CA3AF",fontWeight:700,textTransform:"uppercase",letterSpacing:".3px"}}>{u.codigo}</div>
+                    <div style={{fontSize:14,fontWeight:700,color:"#111827",marginTop:1}}>{nomeLimpo(u.catalogo?.nome,u.codigo)}</div>
+                    <div style={{fontSize:11,color:"#9CA3AF",marginTop:2}}>Desde {fmtDateTime(u.data_retirada_atual)}</div>
+                  </div>
                 </div>
+                {checked&&<SeletorCondicao value={condicoes[key]} onChange={v=>setCondicoes(prev=>({...prev,[key]:v}))}/>}
               </label>
             );
           })}
           {emprestimos.map(e=>{
             const key="e-"+e.id, checked=selecionados.has(key);
             return(
-              <label key={key} style={{display:"flex",alignItems:"center",gap:10,padding:"11px 14px",cursor:"pointer",
+              <label key={key} style={{display:"flex",flexDirection:"column",padding:"11px 14px",cursor:"pointer",
                 background:checked?"#EEF2FF":"#fff",border:`1.5px solid ${checked?BLUE:"#F1F5F9"}`,borderRadius:10}}>
-                <input type="checkbox" checked={checked} onChange={()=>toggle(key)} style={{width:16,height:16,flexShrink:0}}/>
-                <div style={{flex:1,minWidth:0}}>
-                  <div style={{fontSize:14,fontWeight:700,color:"#111827"}}>{e.quantidade}x {e.estoque?.catalogo?.nome}</div>
-                  <div style={{fontSize:11,color:"#9CA3AF",marginTop:2}}>Desde {fmtDateTime(e.data_retirada)}</div>
+                <div style={{display:"flex",alignItems:"center",gap:10}}>
+                  <input type="checkbox" checked={checked} onChange={()=>toggle(key)} style={{width:16,height:16,flexShrink:0}}/>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:14,fontWeight:700,color:"#111827"}}>{e.quantidade}x {e.estoque?.catalogo?.nome}</div>
+                    <div style={{fontSize:11,color:"#9CA3AF",marginTop:2}}>Desde {fmtDateTime(e.data_retirada)}</div>
+                  </div>
                 </div>
+                {checked&&<SeletorCondicao value={condicoes[key]} onChange={v=>setCondicoes(prev=>({...prev,[key]:v}))}/>}
               </label>
             );
           })}
