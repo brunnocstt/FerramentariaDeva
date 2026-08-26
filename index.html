@@ -3902,7 +3902,7 @@ function GestaoUsuariosView({profile,filiais}){
   const[loading,setLoading]=useState(true);
   const[novoAberto,setNovoAberto]=useState(false);
   const[editando,setEditando]=useState(null);
-  const[senhaTempInfo,setSenhaTempInfo]=useState(null);
+  const[emailResetInfo,setEmailResetInfo]=useState(null);
   const[erroAcao,setErroAcao]=useState("");
   const[busca,setBusca]=useState("");
   const[filtroPerfil,setFiltroPerfil]=useState("");
@@ -3938,15 +3938,13 @@ function GestaoUsuariosView({profile,filiais}){
 
   async function resetSenha(u){
     if(semAcessoReal(u))return; // reforço: nunca dispara pra conta sem acesso real, mesmo se algo chamar isso fora do botão
+    if(!window.confirm(`Enviar e-mail de redefinição de senha para ${u.name} (${u.email})?`))return;
     setErroAcao("");
-    const{data:sess}=await supabase.auth.getSession();
-    const resp=await fetch(`${SUPA_URL}/functions/v1/admin-update-user`,{
-      method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${sess.session.access_token}`},
-      body:JSON.stringify({user_id:u.id,action:"reset_password"}),
+    const{data,error}=await supabase.functions.invoke("send-email",{
+      body:{emailType:"password_reset",userId:u.id},
     });
-    const json=await resp.json();
-    if(!json.ok){setErroAcao(json.error);return;}
-    setSenhaTempInfo({email:u.email,tempPassword:json.tempPassword});
+    if(error||!data?.ok){setErroAcao(data?.error||error?.message||"Falha ao enviar e-mail de redefinição.");return;}
+    setEmailResetInfo({email:u.email});
   }
 
   const listaFiltrada=useMemo(()=>{
@@ -4145,14 +4143,13 @@ function GestaoUsuariosView({profile,filiais}){
         onClose={()=>setNovoAberto(false)} onSaved={()=>{setNovoAberto(false);load();}}/>}
       {editando&&<ModalUsuario filiais={filiais} profile={profile} editando={editando}
         onClose={()=>setEditando(null)} onSaved={()=>{setEditando(null);load();}}/>}
-      {senhaTempInfo&&(
-        <Modal title="Senha redefinida" onClose={()=>setSenhaTempInfo(null)} footer={<BtnPrimary onClick={()=>setSenhaTempInfo(null)}>Concluído</BtnPrimary>}>
-          <p style={{fontSize:13,color:"#374151",lineHeight:1.6}}>Nova senha temporária para <strong>{senhaTempInfo.email}</strong>:</p>
-          <div style={{padding:14,borderRadius:10,background:"#F9FAFB",border:"1px solid #F1F5F9",textAlign:"center",
-            fontSize:16,fontWeight:800,letterSpacing:"1px",color:"#111827",fontFamily:"monospace"}}>
-            {senhaTempInfo.tempPassword}
-          </div>
-          <p style={{fontSize:12,color:"#9CA3AF",marginTop:10}}>Repasse esta senha ao usuário por um canal seguro. Ela não será exibida novamente.</p>
+      {emailResetInfo&&(
+        <Modal title="E-mail enviado" onClose={()=>setEmailResetInfo(null)} footer={<BtnPrimary onClick={()=>setEmailResetInfo(null)}>Concluído</BtnPrimary>}>
+          <p style={{fontSize:13,color:"#374151",lineHeight:1.6}}>
+            Um e-mail com o link de redefinição de senha foi enviado para <strong>{emailResetInfo.email}</strong>.
+            O próprio usuário deve abrir o link e definir a nova senha — ela não passa por você em nenhum momento.
+          </p>
+          <p style={{fontSize:12,color:"#9CA3AF",marginTop:10}}>O link expira em 1 hora.</p>
         </Modal>
       )}
     </>
