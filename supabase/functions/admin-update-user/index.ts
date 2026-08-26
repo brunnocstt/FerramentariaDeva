@@ -18,13 +18,6 @@ function fail(message: string, status = 200) {
   console.error("[admin-update-user] Erro:", message);
   return new Response(JSON.stringify({ ok: false, error: message }), { status, headers: CORS_HEADERS });
 }
-function randomPassword(len = 24): string {
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%";
-  const arr = new Uint8Array(len);
-  crypto.getRandomValues(arr);
-  return Array.from(arr).map(b => chars[b % chars.length]).join("");
-}
-
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS_HEADERS });
   if (req.method !== "POST") return fail("Método não suportado.", 405);
@@ -53,13 +46,6 @@ serve(async (req) => {
     }
     if (target.email === PROTECTED_EMAIL && callerData.user.id !== target.id) {
       return fail("Este usuário está protegido e só pode ser editado por ele mesmo.", 403);
-    }
-
-    if (action === "reset_password") {
-      const tempPassword = randomPassword();
-      const { error: updErr } = await admin.auth.admin.updateUserById(user_id, { password: tempPassword });
-      if (updErr) return fail("Falha ao redefinir senha: " + updErr.message);
-      return ok({ tempPassword });
     }
 
     if (action === "toggle_active") {

@@ -11,6 +11,14 @@ const APP_URL    = Deno.env.get("APP_URL") ?? "https://ferramentariadeva.albusda
 const SUPPORT_EMAIL = "bruno.cesar@deva.com.br";
 const FROM       = `"Ferramentaria Deva" <${FROM_EMAIL}>`;
 
+// Segredo interno (não é credencial de terceiros) que autentica a chamada feita pelo trigger
+// Postgres (public.fn_notifica_email_operacional, via net.http_post) nesta function.
+// Usado só porque o recurso nativo "Database Webhooks" do painel não está disponível
+// neste projeto (schema supabase_functions ausente) — ver ARQUITETURA.md.
+// Definido só como secret da function (painel → Edge Functions → send-email → Secrets),
+// nunca hardcoded aqui.
+const INTERNAL_WEBHOOK_SECRET = Deno.env.get("INTERNAL_WEBHOOK_SECRET")!;
+
 const admin = createClient(SUPABASE_URL, SERVICE_ROLE);
 
 const transporter = nodemailer.createTransport({
@@ -68,8 +76,14 @@ function buildHtml(title: string, bodyHtml: string): string {
 }
 
 async function sendMail(to: string, subject: string, bodyHtml: string) {
-  await transporter.sendMail({ from: FROM, to, subject, html: buildHtml(subject, bodyHtml) });
-  console.log(`[send-email] Enviado para ${to} — ${subject}`);
+  const info = await transporter.sendMail({ from: FROM, to, subject, html: buildHtml(subject, bodyHtml) });
+  console.log(`[send-email] Enviado para ${to} — ${subject} — from=${FROM} — resposta SMTP: ${JSON.stringify({
+    messageId: info.messageId,
+    envelope: info.envelope,
+    accepted: info.accepted,
+    rejected: info.rejected,
+    response: info.response,
+  })}`);
 }
 
 // CORS restrito ao domínio real do app — nada de "*" numa function que aceita POST não autenticado.
@@ -97,7 +111,12 @@ function genToken(): string {
 
 // Tipos de notificação operacional (webhook de banco) que geram e-mail.
 // Os demais tipos ficam só no sino de notificações in-app, pra não gerar spam.
-const NOTIFICATION_TYPES_COM_EMAIL = new Set(["afericao_proxima", "retirada_atrasada"]);
+const NOTIFICATION_TYPES_COM_EMAIL = new Set([
+  "afericao_proxima",
+  "retirada_atrasada",
+  "licenca_proxima",
+  "ferramenta_danificada",
+]);
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS_HEADERS });
@@ -112,12 +131,12 @@ serve(async (req) => {
 
   try {
     // ── A. Webhook de banco de dados (INSERT em notifications) ──
-    // Exige o mesmo Bearer de service role usado pelas chamadas internas do sistema (mesmo
-    // padrão do welcome_with_setup abaixo) — é assim que um Database Webhook do Supabase chama
-    // esta function quando configurado com "Authorization: service role" no painel.
+    // Chamada feita pelo trigger public.fn_notifica_email_operacional (via net.http_post),
+    // autenticada por um segredo interno (não é credencial de terceiros) em vez do Database
+    // Webhook nativo do painel, indisponível neste projeto (schema supabase_functions ausente).
     if (payload.type === "INSERT" && payload.table === "notifications" && payload.record) {
-      const authHeader = req.headers.get("Authorization") || "";
-      if (authHeader !== `Bearer ${SERVICE_ROLE}`) return err("Não autorizado.", 401);
+      const webhookSecret = req.headers.get("x-webhook-secret") || "";
+      if (webhookSecret !== INTERNAL_WEBHOOK_SECRET) return err("Não autorizado.", 401);
 
       const record = payload.record;
       if (!NOTIFICATION_TYPES_COM_EMAIL.has(record.type)) return ok({ skipped: true });
@@ -176,13 +195,30 @@ serve(async (req) => {
       const jwt = authHeader.replace("Bearer ", "");
       const { data: caller } = await admin.auth.getUser(jwt);
       if (!caller?.user) return err("Não autorizado.", 401);
-      const { data: callerProfile } = await admin.from("profiles").select("user_type").eq("id", caller.user.id).single();
-      if (!callerProfile || !["admin_geral", "admin_area"].includes(callerProfile.user_type)) {
+      const { data: callerProfile } = await admin.from("profiles").select("user_type,filial_id,is_active").eq("id", caller.user.id).single();
+      if (!callerProfile || !callerProfile.is_active || !["admin_geral", "admin_area"].includes(callerProfile.user_type)) {
         return err("Apenas administradores podem enviar redefinição de senha.", 403);
       }
 
-      const { userId, email } = payload;
-      if (!userId || !email) return err("Parâmetros ausentes.");
+      const { userId } = payload;
+      if (!userId) return err("Parâmetros ausentes.");
+
+      // E-mail e nome sempre vêm do cadastro no banco — nunca do que o cliente mandar no payload,
+      // pra um admin_area não conseguir gerar um link de reset válido e mandar pra um endereço
+      // arbitrário dele mesmo.
+      const { data: target, error: targetErr } = await admin
+        .from("profiles")
+        .select("email,name,filial_id,is_active")
+        .eq("id", userId)
+        .single();
+      if (targetErr || !target) return err("Usuário não encontrado.");
+      if (!target.is_active) return err("Este usuário está inativo.");
+      if (callerProfile.user_type === "admin_area" && target.filial_id !== callerProfile.filial_id) {
+        return err("Você só pode redefinir a senha de usuários da sua própria filial.", 403);
+      }
+      if (target.email === SUPPORT_EMAIL && caller.user.id !== userId) {
+        return err("Este usuário está protegido e só pode redefinir a própria senha.", 403);
+      }
 
       await admin.from("password_reset_tokens").delete().eq("user_id", userId);
       const token = genToken();
@@ -192,18 +228,18 @@ serve(async (req) => {
 
       const link = `${APP_URL}/?reset_token=${token}`;
       await sendMail(
-        email,
+        target.email,
         "Redefinição de senha — Ferramentaria Deva",
-        `<p style="font-size:16px;color:#111827;margin:0 0 20px;font-weight:bold;">Olá!</p>
+        `<p style="font-size:16px;color:#111827;margin:0 0 20px;font-weight:bold;">Olá, ${target.name}!</p>
          <p style="font-size:15px;color:#374151;line-height:1.7;margin:0 0 16px;">
-           Recebemos uma solicitação para alterar a senha da sua conta no sistema de <strong>Controle de Ferramentaria</strong> da Deva Veículos.
+           Um administrador solicitou a redefinição da senha da sua conta no sistema de <strong>Controle de Ferramentaria</strong> da Deva Veículos.
          </p>
          <p style="font-size:15px;color:#374151;line-height:1.7;margin:0 0 32px;">
            Clique no botão abaixo para criar uma nova senha. Este link expira em <strong>1 hora</strong>.
          </p>
          ${btn("Redefinir minha senha", link)}
          <p style="font-size:13px;color:#9ca3af;text-align:center;margin:24px 0 32px;line-height:1.6;">
-           Se você não solicitou isso, ignore este e-mail e avise um administrador.
+           Se você não esperava isso, ignore este e-mail e avise um administrador.
          </p>
          ${supportBox()}
          ${SIGNOFF}`
