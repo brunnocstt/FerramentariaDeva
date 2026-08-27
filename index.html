@@ -207,7 +207,7 @@ function fmtDuracao(iso){
 function fmtDuracaoMs(ms){
   if(!(ms>=0))return "—";
   const min=Math.floor(ms/60000);
-  if(min<1)return "agora";
+  if(min<1)return "menos de 1 min";
   if(min<60)return `${min} min`;
   const h=Math.floor(min/60);
   if(h<24)return `${h}h${min%60?String(min%60).padStart(2,"0")+"min":""}`;
@@ -1360,9 +1360,12 @@ function ModalAcao({ferramenta,tipo,onClose,onDone,pessoasFilial}){
     if(CONFIG.needsPessoa&&!pessoaId){setError("Selecione com quem a ferramenta vai ficar.");return;}
     if(CONFIG.needsCondicao&&!condicao){setError("Escolha a condição da ferramenta antes de confirmar.");return;}
     setLoading(true);setError("");
+    // Na devolução não perguntamos de quem — é sempre quem já está com a ferramenta
+    // (ferramenta.colaborador_atual_id), nunca null. Sem isso o histórico "Por Mecânico"
+    // não consegue casar essa devolução com a retirada correspondente.
     const{error:err}=await supabase.from("movimentacoes").insert({
       ferramenta_id:ferramenta.id,tipo,
-      pessoa_responsavel_id:CONFIG.needsPessoa?pessoaId:null,
+      pessoa_responsavel_id:tipo==="devolucao"?ferramenta.colaborador_atual_id:(CONFIG.needsPessoa?pessoaId:null),
       condicao:CONFIG.needsCondicao?condicao:null,
       observacao:observacao||null,
     });
@@ -2738,7 +2741,7 @@ function DevolucaoColaborador({colaborador,onVoltar,onFeito}){
     for(const u of unidades){
       const key="u-"+u.id;
       if(!selecionados.has(key))continue;
-      const{error:err}=await supabase.from("movimentacoes").insert({ferramenta_id:u.id,tipo:"devolucao",condicao:condicoes[key]});
+      const{error:err}=await supabase.from("movimentacoes").insert({ferramenta_id:u.id,tipo:"devolucao",condicao:condicoes[key],pessoa_responsavel_id:colaborador.id});
       if(err){setError(`Não foi possível devolver ${u.codigo}: ${err.message||""}`);setSalvando(false);load();onFeito?.();return;}
       novosFeitos.push(`${u.codigo} — ${nomeLimpo(u.catalogo?.nome,u.codigo)}`);
     }
@@ -3134,8 +3137,7 @@ function HistoricoPorFerramentaView({profile}){
 }
 
 // ── Aba "Por Mecânico" — busca um colaborador (nome/matrícula) e mostra tudo que ele já pegou
-// emprestado (unidades + estoque por quantidade, juntos numa linha do tempo só) e as
-// transferências entre filiais que ele solicitou.
+// emprestado (unidades + estoque por quantidade, juntos numa linha do tempo só).
 function HistoricoPorMecanicoView({profile,pessoas}){
   const[busca,setBusca]=useState("");
   const[selecionado,setSelecionado]=useState(null);
@@ -3198,17 +3200,11 @@ function HistoricoPorMecanicoView({profile,pessoas}){
 
   async function selecionar(p){
     setSelecionado(p);setDados(null);setCarregando(true);
-    const[{data:movs},{data:emp},{data:transfF},{data:transfE}]=await Promise.all([
+    const[{data:movs},{data:emp}]=await Promise.all([
       supabase.from("movimentacoes").select("*, ferramenta:ferramenta_id(codigo,catalogo:catalogo_id(nome))")
         .eq("pessoa_responsavel_id",p.id).in("tipo",["retirada","devolucao"]).order("data",{ascending:true}),
       supabase.from("emprestimos").select("*, estoque:estoque_id(catalogo:catalogo_id(nome), filial:filial_id(nome))")
         .eq("colaborador_id",p.id).order("data_retirada",{ascending:false}),
-      supabase.from("transferencias_ferramenta")
-        .select("*, ferramenta:ferramenta_id(codigo,catalogo:catalogo_id(nome)), origem:filial_origem_id(nome), destino:filial_destino_id(nome)")
-        .eq("solicitante_id",p.id).order("created_at",{ascending:false}),
-      supabase.from("transferencias_estoque")
-        .select("*, catalogo:catalogo_id(nome), origem:filial_origem_id(nome), destino:filial_destino_id(nome)")
-        .eq("solicitante_id",p.id).order("created_at",{ascending:false}),
     ]);
     const sessoesUnidade=pareaSessoesPorGrupo(movs||[],m=>m.ferramenta_id,
       m=>`${m.ferramenta?.codigo} — ${nomeLimpo(m.ferramenta?.catalogo?.nome,m.ferramenta?.codigo)}`);
@@ -3217,11 +3213,7 @@ function HistoricoPorMecanicoView({profile,pessoas}){
       dataRetirada:e.data_retirada,dataDevolucao:e.data_devolucao,
     }));
     const sessoes=[...sessoesUnidade,...sessoesPool].sort((a,b)=>new Date(b.dataRetirada)-new Date(a.dataRetirada));
-    const transferencias=[
-      ...(transfF||[]).map(t=>({...t,label:`${t.ferramenta?.codigo} — ${nomeLimpo(t.ferramenta?.catalogo?.nome,t.ferramenta?.codigo)}`,solicitante:{name:p.name}})),
-      ...(transfE||[]).map(t=>({...t,label:`${t.catalogo?.nome||"—"} — ${t.quantidade}×`,solicitante:{name:p.name}})),
-    ].sort((a,b)=>new Date(b.decided_at||b.created_at)-new Date(a.decided_at||a.created_at));
-    setDados({sessoes,transferencias});
+    setDados({sessoes});
     setCarregando(false);
   }
 
@@ -3283,12 +3275,6 @@ function HistoricoPorMecanicoView({profile,pessoas}){
         {dados.sessoes.length===0?<EmptyState icon={History} title="Nenhum empréstimo registrado"/>:(
           <div style={{background:"#fff",border:"1px solid #F1F5F9",borderRadius:14,overflow:"hidden"}}>
             {dados.sessoes.map((s,i)=><LinhaSessao key={i} {...s}/>)}
-          </div>
-        )}
-        <h4 style={{fontSize:12,fontWeight:800,color:"#374151",textTransform:"uppercase",letterSpacing:".05em",margin:"18px 0 8px"}}>Transferências Solicitadas entre Filiais</h4>
-        {dados.transferencias.length===0?<EmptyState icon={ArrowLeftRight} title="Nenhuma transferência registrada"/>:(
-          <div style={{background:"#fff",border:"1px solid #F1F5F9",borderRadius:14,overflow:"hidden"}}>
-            {dados.transferencias.map(t=><LinhaTransferencia key={t.id} t={t}/>)}
           </div>
         )}
       </>)}
