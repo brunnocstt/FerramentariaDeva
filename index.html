@@ -2886,7 +2886,7 @@ function IndicadoresSessoes({ind}){
     <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:16}}>
       <ChipIndicador label="Empréstimos" valor={ind.total}/>
       <ChipIndicador label="Com a pessoa agora" valor={ind.abertas} destaque={ind.abertas>0}/>
-      <ChipIndicador label="Tempo total emprestado" valor={fmtDuracaoMs(ind.tempoTotalMs)}/>
+      <ChipIndicador label="Tempo total emprestado" valor={ind.fechadas?fmtDuracaoMs(ind.tempoTotalMs):"—"}/>
       <ChipIndicador label="Tempo médio por empréstimo" valor={ind.fechadas?fmtDuracaoMs(ind.tempoMedioMs):"—"}/>
     </div>
   );
