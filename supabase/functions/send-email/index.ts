@@ -117,8 +117,24 @@ function bigCodeBox(value: string): string {
     <span style="font-family:'Courier New',monospace;font-size:32px;font-weight:bold;letter-spacing:8px;color:#1955FF;">${value}</span>
   </td></tr></table>`;
 }
+// Mesma ideia do bigCodeBox, mas pra senha temporária (mais caracteres) — fonte e espaçamento
+// menores, senão não cabe na largura do e-mail.
+function passwordBox(value: string): string {
+  return `<table cellpadding="0" cellspacing="0" style="margin:0 auto 8px;"><tr><td style="background:#f0f4ff;border:1.5px dashed #1955FF;border-radius:10px;padding:16px 24px;">
+    <span style="font-family:'Courier New',monospace;font-size:20px;font-weight:bold;letter-spacing:2px;color:#1955FF;word-break:break-all;">${value}</span>
+  </td></tr></table>`;
+}
 const MAX_TENTATIVAS_CODIGO = 5;
 const VALIDADE_CODIGO_MIN = 10;
+
+// Senha temporária de verdade (fluxo do admin) — alfanumérica com símbolo, não só dígitos.
+// Exclui caracteres fáceis de confundir (0/O, 1/l/I) já que precisa ser digitada.
+function randomPassword(len = 14): string {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%&*";
+  const arr = new Uint8Array(len);
+  crypto.getRandomValues(arr);
+  return Array.from(arr).map(b => chars[b % chars.length]).join("");
+}
 
 // Tipos de notificação operacional (webhook de banco) que geram e-mail.
 // Os demais tipos ficam só no sino de notificações in-app, pra não gerar spam.
@@ -327,7 +343,7 @@ serve(async (req) => {
         return err("Este usuário está protegido e só pode redefinir a própria senha.", 403);
       }
 
-      const tempPassword = genCode6() + genCode6().slice(0, 2); // 8 dígitos, fácil de digitar/ditar
+      const tempPassword = randomPassword();
       const { error: updErr } = await admin.auth.admin.updateUserById(userId, { password: tempPassword });
       if (updErr) return err("Falha ao redefinir senha: " + updErr.message);
 
@@ -342,7 +358,7 @@ serve(async (req) => {
            Um administrador (<strong>${callerProfile.name}</strong>) redefiniu a senha da sua conta no sistema de <strong>Controle de Ferramentaria</strong> da Deva Veículos.
          </p>
          <p style="font-size:15px;color:#374151;line-height:1.7;margin:0 0 12px;">Use a senha temporária abaixo pra entrar:</p>
-         ${bigCodeBox(tempPassword)}
+         ${passwordBox(tempPassword)}
          <p style="font-size:15px;color:#374151;line-height:1.7;margin:24px 0 32px;">
            Assim que você acessar, o sistema vai pedir pra você criar uma senha nova antes de continuar.
          </p>
@@ -360,7 +376,7 @@ serve(async (req) => {
            <p style="font-size:15px;color:#374151;line-height:1.7;margin:0 0 16px;">
              Você solicitou a redefinição de senha de <strong>${target.name}</strong> (${target.email}). A mesma senha temporária abaixo também foi enviada diretamente pra ele(a):
            </p>
-           ${bigCodeBox(tempPassword)}
+           ${passwordBox(tempPassword)}
            <p style="font-size:13px;color:#9ca3af;text-align:center;margin:24px 0 32px;line-height:1.6;">
              No primeiro login, o sistema vai exigir que essa pessoa crie uma senha nova antes de continuar.
            </p>
