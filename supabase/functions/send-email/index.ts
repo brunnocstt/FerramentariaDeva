@@ -105,11 +105,20 @@ function err(message: string, status = 200) {
   return new Response(JSON.stringify({ ok: false, error: message }), { status, headers: CORS_HEADERS });
 }
 
-function genToken(): string {
-  const arr = new Uint8Array(32);
+// Código numérico de 6 dígitos (fluxo de auto-atendimento) — nada de link, pra não ser
+// "clicado" antes da hora por firewall corporativo (Safe Links etc.), invalidando o token.
+function genCode6(): string {
+  const arr = new Uint32Array(1);
   crypto.getRandomValues(arr);
-  return Array.from(arr).map(b => b.toString(16).padStart(2, "0")).join("");
+  return String(100000 + (arr[0] % 900000));
 }
+function bigCodeBox(value: string): string {
+  return `<table cellpadding="0" cellspacing="0" style="margin:0 auto 8px;"><tr><td style="background:#f0f4ff;border:1.5px dashed #1955FF;border-radius:10px;padding:18px 32px;">
+    <span style="font-family:'Courier New',monospace;font-size:32px;font-weight:bold;letter-spacing:8px;color:#1955FF;">${value}</span>
+  </td></tr></table>`;
+}
+const MAX_TENTATIVAS_CODIGO = 5;
+const VALIDADE_CODIGO_MIN = 10;
 
 // Tipos de notificação operacional (webhook de banco) que geram e-mail.
 // Os demais tipos ficam só no sino de notificações in-app, pra não gerar spam.
@@ -192,27 +201,123 @@ serve(async (req) => {
       return ok();
     }
 
-    if (emailType === "password_reset") {
+    // ══════════════════════════════════════════════════════════════
+    // CENÁRIO 1 — auto-atendimento: colaborador esqueceu a senha, pede ele mesmo,
+    // recebe um código de 6 dígitos (nunca um link) e digita no próprio app.
+    // ══════════════════════════════════════════════════════════════
+
+    if (emailType === "forgot_password_request") {
+      const email = String(payload.email || "").trim().toLowerCase();
+      if (!email) return err("Parâmetros ausentes.");
+
+      // Sempre responde "ok" independente de o e-mail existir ou não — não dá pra deixar
+      // alguém descobrir quais e-mails têm conta só testando esse endpoint.
+      const { data: target } = await admin
+        .from("profiles").select("id,name,email,is_active").ilike("email", email).maybeSingle();
+
+      if (target && target.is_active) {
+        await admin.from("password_reset_tokens").delete().eq("user_id", target.id);
+        const code = genCode6();
+        const expiresAt = new Date(Date.now() + VALIDADE_CODIGO_MIN * 60 * 1000).toISOString();
+        const { error: insErr } = await admin.from("password_reset_tokens")
+          .insert({ user_id: target.id, token: code, expires_at: expiresAt, attempts: 0 });
+        if (!insErr) {
+          await sendMail(
+            target.email,
+            "Código de verificação — Ferramentaria Deva",
+            `<p style="font-size:16px;color:#111827;margin:0 0 20px;font-weight:bold;">Olá, ${target.name}!</p>
+             <p style="font-size:15px;color:#374151;line-height:1.7;margin:0 0 28px;">
+               Recebemos uma solicitação para redefinir a senha da sua conta. Digite o código abaixo no sistema pra continuar:
+             </p>
+             ${bigCodeBox(code)}
+             <p style="font-size:13px;color:#9ca3af;text-align:center;margin:24px 0 32px;line-height:1.6;">
+               Este código expira em ${VALIDADE_CODIGO_MIN} minutos. Se você não pediu isso, ignore este e-mail.
+             </p>
+             ${supportBox()}
+             ${SIGNOFF}`
+          );
+        }
+      }
+      return ok();
+    }
+
+    if (emailType === "forgot_password_verify_code") {
+      const email = String(payload.email || "").trim().toLowerCase();
+      const code = String(payload.code || "").trim();
+      if (!email || !code) return err("Parâmetros ausentes.");
+
+      const { data: target } = await admin.from("profiles").select("id,is_active").ilike("email", email).maybeSingle();
+      if (!target || !target.is_active) return err("Código inválido ou expirado.");
+
+      const { data: row } = await admin.from("password_reset_tokens")
+        .select("id,token,expires_at,used_at,attempts")
+        .eq("user_id", target.id).order("created_at", { ascending: false }).limit(1).maybeSingle();
+      if (!row || row.used_at || new Date(row.expires_at).getTime() < Date.now()) {
+        return err("Código inválido ou expirado.");
+      }
+      if (row.attempts >= MAX_TENTATIVAS_CODIGO) {
+        return err("Muitas tentativas erradas. Solicite um novo código.");
+      }
+      if (row.token !== code) {
+        await admin.from("password_reset_tokens").update({ attempts: row.attempts + 1 }).eq("id", row.id);
+        return err("Código incorreto.");
+      }
+      return ok();
+    }
+
+    if (emailType === "forgot_password_set_new") {
+      const email = String(payload.email || "").trim().toLowerCase();
+      const code = String(payload.code || "").trim();
+      const { newPassword } = payload;
+      if (!email || !code || !newPassword) return err("Parâmetros ausentes.");
+      if (String(newPassword).length < 8) return err("A senha deve ter pelo menos 8 caracteres.");
+
+      const { data: target } = await admin.from("profiles").select("id,is_active").ilike("email", email).maybeSingle();
+      if (!target || !target.is_active) return err("Código inválido ou expirado.");
+
+      const { data: row } = await admin.from("password_reset_tokens")
+        .select("id,token,expires_at,used_at,attempts")
+        .eq("user_id", target.id).order("created_at", { ascending: false }).limit(1).maybeSingle();
+      if (!row || row.used_at || new Date(row.expires_at).getTime() < Date.now()) {
+        return err("Código inválido ou expirado.");
+      }
+      if (row.attempts >= MAX_TENTATIVAS_CODIGO) return err("Muitas tentativas erradas. Solicite um novo código.");
+      if (row.token !== code) {
+        await admin.from("password_reset_tokens").update({ attempts: row.attempts + 1 }).eq("id", row.id);
+        return err("Código incorreto.");
+      }
+
+      const { error: updErr } = await admin.auth.admin.updateUserById(target.id, { password: newPassword });
+      if (updErr) return err("Falha ao redefinir senha: " + updErr.message);
+
+      await admin.from("password_reset_tokens").update({ used_at: new Date().toISOString() }).eq("id", row.id);
+      await admin.from("profiles").update({ must_change_password: false }).eq("id", target.id);
+      return ok();
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // CENÁRIO 2 — administrador reseta a senha de outra pessoa pelo painel: gera uma senha
+    // temporária, manda por e-mail pro administrador (quem pediu) E pro colaborador afetado.
+    // No próximo login, o colaborador é obrigado a trocar a senha antes de usar o sistema
+    // (profiles.must_change_password).
+    // ══════════════════════════════════════════════════════════════
+
+    if (emailType === "admin_reset_temp_password") {
       const authHeader = req.headers.get("Authorization") || "";
       const jwt = authHeader.replace("Bearer ", "");
       const { data: caller } = await admin.auth.getUser(jwt);
       if (!caller?.user) return err("Não autorizado.", 401);
-      const { data: callerProfile } = await admin.from("profiles").select("user_type,filial_id,is_active").eq("id", caller.user.id).single();
+      const { data: callerProfile } = await admin.from("profiles")
+        .select("user_type,filial_id,is_active,name,email").eq("id", caller.user.id).single();
       if (!callerProfile || !callerProfile.is_active || !["admin_geral", "admin_area"].includes(callerProfile.user_type)) {
-        return err("Apenas administradores podem enviar redefinição de senha.", 403);
+        return err("Apenas administradores podem redefinir senha de outro usuário.", 403);
       }
 
       const { userId } = payload;
       if (!userId) return err("Parâmetros ausentes.");
 
-      // E-mail e nome sempre vêm do cadastro no banco — nunca do que o cliente mandar no payload,
-      // pra um admin_area não conseguir gerar um link de reset válido e mandar pra um endereço
-      // arbitrário dele mesmo.
       const { data: target, error: targetErr } = await admin
-        .from("profiles")
-        .select("email,name,filial_id,is_active")
-        .eq("id", userId)
-        .single();
+        .from("profiles").select("email,name,filial_id,is_active").eq("id", userId).single();
       if (targetErr || !target) return err("Usuário não encontrado.");
       if (!target.is_active) return err("Este usuário está inativo.");
       if (callerProfile.user_type === "admin_area" && target.filial_id !== callerProfile.filial_id) {
@@ -222,51 +327,47 @@ serve(async (req) => {
         return err("Este usuário está protegido e só pode redefinir a própria senha.", 403);
       }
 
-      await admin.from("password_reset_tokens").delete().eq("user_id", userId);
-      const token = genToken();
-      const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
-      const { error: insErr } = await admin.from("password_reset_tokens").insert({ user_id: userId, token, expires_at: expiresAt });
-      if (insErr) return err("Falha ao gerar token: " + insErr.message);
+      const tempPassword = genCode6() + genCode6().slice(0, 2); // 8 dígitos, fácil de digitar/ditar
+      const { error: updErr } = await admin.auth.admin.updateUserById(userId, { password: tempPassword });
+      if (updErr) return err("Falha ao redefinir senha: " + updErr.message);
 
-      const link = `${APP_URL}/?reset_token=${token}`;
+      const { error: flagErr } = await admin.from("profiles").update({ must_change_password: true }).eq("id", userId);
+      if (flagErr) return err("Falha ao sinalizar troca obrigatória: " + flagErr.message);
+
       await sendMail(
         target.email,
-        "Redefinição de senha — Ferramentaria Deva",
+        "Sua senha foi redefinida — Ferramentaria Deva",
         `<p style="font-size:16px;color:#111827;margin:0 0 20px;font-weight:bold;">Olá, ${target.name}!</p>
          <p style="font-size:15px;color:#374151;line-height:1.7;margin:0 0 16px;">
-           Um administrador solicitou a redefinição da senha da sua conta no sistema de <strong>Controle de Ferramentaria</strong> da Deva Veículos.
+           Um administrador (<strong>${callerProfile.name}</strong>) redefiniu a senha da sua conta no sistema de <strong>Controle de Ferramentaria</strong> da Deva Veículos.
          </p>
-         <p style="font-size:15px;color:#374151;line-height:1.7;margin:0 0 32px;">
-           Clique no botão abaixo para criar uma nova senha. Este link expira em <strong>1 hora</strong>.
+         <p style="font-size:15px;color:#374151;line-height:1.7;margin:0 0 12px;">Use a senha temporária abaixo pra entrar:</p>
+         ${bigCodeBox(tempPassword)}
+         <p style="font-size:15px;color:#374151;line-height:1.7;margin:24px 0 32px;">
+           Assim que você acessar, o sistema vai pedir pra você criar uma senha nova antes de continuar.
          </p>
-         ${btn("Redefinir minha senha", link)}
-         <p style="font-size:13px;color:#9ca3af;text-align:center;margin:24px 0 32px;line-height:1.6;">
-           Se você não esperava isso, ignore este e-mail e avise um administrador.
-         </p>
+         ${btn("Abrir Ferramentaria Deva", APP_URL)}
+         <div style="height:1px;background:#e5e7eb;margin:32px 0;"></div>
          ${supportBox()}
          ${SIGNOFF}`
       );
-      return ok();
-    }
 
-    if (emailType === "reset_password_verify") {
-      const { token, newPassword } = payload;
-      if (!token || !newPassword) return err("Parâmetros ausentes.");
-      if (String(newPassword).length < 8) return err("A senha deve ter pelo menos 8 caracteres.");
-
-      const { data: row, error: findErr } = await admin
-        .from("password_reset_tokens")
-        .select("id,user_id,expires_at,used_at")
-        .eq("token", token)
-        .single();
-      if (findErr || !row) return err("Link inválido ou expirado.");
-      if (row.used_at) return err("Este link já foi utilizado.");
-      if (new Date(row.expires_at).getTime() < Date.now()) return err("Este link expirou. Solicite um novo.");
-
-      const { error: updErr } = await admin.auth.admin.updateUserById(row.user_id, { password: newPassword });
-      if (updErr) return err("Falha ao redefinir senha: " + updErr.message);
-
-      await admin.from("password_reset_tokens").update({ used_at: new Date().toISOString() }).eq("id", row.id);
+      if (callerProfile.email && callerProfile.email !== target.email) {
+        await sendMail(
+          callerProfile.email,
+          "Senha temporária gerada — Ferramentaria Deva",
+          `<p style="font-size:16px;color:#111827;margin:0 0 20px;font-weight:bold;">Olá, ${callerProfile.name}!</p>
+           <p style="font-size:15px;color:#374151;line-height:1.7;margin:0 0 16px;">
+             Você solicitou a redefinição de senha de <strong>${target.name}</strong> (${target.email}). A mesma senha temporária abaixo também foi enviada diretamente pra ele(a):
+           </p>
+           ${bigCodeBox(tempPassword)}
+           <p style="font-size:13px;color:#9ca3af;text-align:center;margin:24px 0 32px;line-height:1.6;">
+             No primeiro login, o sistema vai exigir que essa pessoa crie uma senha nova antes de continuar.
+           </p>
+           ${supportBox()}
+           ${SIGNOFF}`
+        );
+      }
       return ok();
     }
 

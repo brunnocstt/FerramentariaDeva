@@ -119,7 +119,6 @@ import{
 const _INITIAL_HASH   = window.location.hash;
 const _INITIAL_SEARCH = window.location.search;
 const _IS_RECOVERY    = _INITIAL_HASH.includes("type=recovery") || _INITIAL_SEARCH.includes("type=recovery");
-const _RESET_TOKEN    = new URLSearchParams(_INITIAL_SEARCH).get("reset_token");
 let _recoveryActive   = _IS_RECOVERY;
 
 const SUPA_URL  = "https://zdwkdfsqxkcrnkovdvba.supabase.co";
@@ -421,6 +420,7 @@ const DEV_TURNSTILE_SITE_KEY="1x00000000000000000000AA";
 const _isDevHost=typeof window!=="undefined"&&(["localhost","127.0.0.1"].includes(window.location.hostname)||window.location.protocol==="file:");
 const TURNSTILE_SITE_KEY=_isDevHost?DEV_TURNSTILE_SITE_KEY:PROD_TURNSTILE_SITE_KEY;
 function LoginScreen({onLoginSuccess}){
+  const[mode,setMode]=useState("login"); // "login" | "forgot"
   const[email,setEmail]=useState("");
   const[password,setPassword]=useState("");
   const[showPass,setShowPass]=useState(false);
@@ -431,6 +431,9 @@ function LoginScreen({onLoginSuccess}){
   const widgetIdRef=useRef(null);
 
   useEffect(()=>{
+    // Precisa depender de "mode": o formulário de login (e o <div> do captcha) desmonta quando
+    // vai pra "Esqueci minha senha" e remonta ao voltar — sem isso o widget não reaparecia.
+    if(mode!=="login")return;
     let cancelled=false;
     let iv=null;
     function renderWidget(){
@@ -446,8 +449,14 @@ function LoginScreen({onLoginSuccess}){
     }
     if(window.turnstile)renderWidget();
     else iv=setInterval(()=>{if(window.turnstile){clearInterval(iv);iv=null;renderWidget();}},200);
-    return()=>{cancelled=true;if(iv)clearInterval(iv);};
-  },[]);
+    return()=>{
+      cancelled=true;if(iv)clearInterval(iv);
+      if(window.turnstile&&widgetIdRef.current!==null){
+        try{window.turnstile.remove(widgetIdRef.current);}catch(_){}
+        widgetIdRef.current=null;
+      }
+    };
+  },[mode]);
 
   function resetCaptcha(){
     setCaptchaToken("");
@@ -468,6 +477,8 @@ function LoginScreen({onLoginSuccess}){
     }
     else{await onLoginSuccess(data.session);}
   }
+
+  if(mode==="forgot")return <ForgotPasswordFlow onBack={()=>setMode("login")}/>;
 
   return(
     <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",
@@ -522,6 +533,11 @@ function LoginScreen({onLoginSuccess}){
                   {showPass?<EyeOff size={15}/>:<EyeIcon size={15}/>}
                 </button>
               </div>
+              <button type="button" onClick={()=>setMode("forgot")}
+                style={{marginTop:8,border:"none",background:"none",color:BLUE,fontSize:12,fontWeight:700,
+                  cursor:"pointer",padding:0}}>
+                Esqueci minha senha
+              </button>
             </div>
             <div ref={captchaRef} style={{display:"flex",justifyContent:"center",minHeight:0}}/>
             <button type="submit" disabled={loading} className="btnblue"
@@ -545,26 +561,52 @@ function LoginScreen({onLoginSuccess}){
   );
 }
 
-function ResetPasswordScreen(){
+// Fluxo de auto-atendimento — "Esqueci minha senha", acessível pelo próprio LoginScreen.
+// Sem link nenhum (por isso não é mais uma tela separada aberta via URL): o colaborador pede,
+// recebe um código de 6 dígitos por e-mail e digita ele mesmo, tudo dentro do app. Existe só
+// pra fugir do problema de firewall corporativo "clicando" e invalidando link de uso único
+// antes do usuário — código digitado não tem esse risco.
+function ForgotPasswordFlow({onBack}){
+  const[step,setStep]=useState("email"); // "email" | "code" | "newpass" | "done"
+  const[email,setEmail]=useState("");
+  const[code,setCode]=useState("");
   const[password,setPassword]=useState("");
   const[confirm,setConfirm]=useState("");
   const[showPass,setShowPass]=useState(false);
   const[showConfirm,setShowConfirm]=useState(false);
   const[loading,setLoading]=useState(false);
   const[error,setError]=useState("");
-  const[done,setDone]=useState(false);
 
-  async function handleSubmit(e){
+  async function pedirCodigo(e){
+    e?.preventDefault();
+    if(!email)return;
+    setLoading(true);setError("");
+    await supabase.functions.invoke("send-email",{body:{emailType:"forgot_password_request",email}});
+    setLoading(false);
+    setStep("code");
+  }
+
+  async function confirmarCodigo(e){
+    e.preventDefault();
+    if(code.trim().length!==6){setError("Digite os 6 dígitos do código.");return;}
+    setLoading(true);setError("");
+    const{data:res,error:fnErr}=await supabase.functions.invoke("send-email",
+      {body:{emailType:"forgot_password_verify_code",email,code:code.trim()}});
+    setLoading(false);
+    if(fnErr||!res?.ok){setError(res?.error||"Código inválido ou expirado.");return;}
+    setStep("newpass");
+  }
+
+  async function salvarNovaSenha(e){
     e.preventDefault();
     if(password.length<8){setError("A senha deve ter pelo menos 8 caracteres.");return;}
     if(password!==confirm){setError("As senhas não coincidem.");return;}
     setLoading(true);setError("");
-    const{data:res,error:fnErr}=await supabase.functions.invoke("send-email",{
-      body:{emailType:"reset_password_verify",token:_RESET_TOKEN,newPassword:password},
-    });
+    const{data:res,error:fnErr}=await supabase.functions.invoke("send-email",
+      {body:{emailType:"forgot_password_set_new",email,code:code.trim(),newPassword:password}});
     setLoading(false);
-    if(fnErr||!res?.ok){setError(res?.error||"Não foi possível redefinir a senha. O link pode ter expirado.");return;}
-    setDone(true);
+    if(fnErr||!res?.ok){setError(res?.error||"Não foi possível redefinir a senha. Peça um novo código e tente de novo.");return;}
+    setStep("done");
   }
 
   return(
@@ -572,24 +614,73 @@ function ResetPasswordScreen(){
       <div style={{width:"100%",maxWidth:400,background:"#fff",borderRadius:20,border:"1px solid #F1F5F9",
         boxShadow:"0 12px 48px rgba(15,23,42,.08)",padding:"40px 32px"}}>
         <div style={{display:"flex",justifyContent:"center",marginBottom:28}}><Logo color="#0A0A0B" height={18}/></div>
-        {done?(
+
+        {step==="done"?(
           <div style={{textAlign:"center"}}>
             <div style={{width:52,height:52,borderRadius:14,background:"#ECFDF5",display:"flex",alignItems:"center",
               justifyContent:"center",margin:"0 auto 18px"}}><Check size={24} color="#059669"/></div>
             <h2 style={{fontSize:18,fontWeight:800,color:"#111827",margin:"0 0 8px"}}>Senha redefinida!</h2>
             <p style={{fontSize:13,color:"#6B7280",margin:"0 0 24px",lineHeight:1.6}}>Já pode acessar o sistema com sua nova senha.</p>
-            <BtnPrimary onClick={()=>{window.location.href=window.location.origin+window.location.pathname;}}>
-              Ir para o login
-            </BtnPrimary>
+            <BtnPrimary onClick={onBack}>Ir para o login</BtnPrimary>
           </div>
+        ):step==="email"?(
+          <>
+            <h1 style={{fontSize:22,fontWeight:800,color:"#111827",margin:"0 0 8px",textAlign:"center"}}>Esqueci minha senha</h1>
+            <p style={{fontSize:13,color:"#6B7280",margin:"0 0 24px",textAlign:"center",lineHeight:1.6}}>
+              Informe seu e-mail cadastrado. Vamos mandar um código de verificação.
+            </p>
+            <ErrorBox>{error}</ErrorBox>
+            <form onSubmit={pedirCodigo} style={{display:"flex",flexDirection:"column",gap:16}}>
+              <Field label="E-mail corporativo" required>
+                <input type="email" required value={email} onChange={e=>setEmail(e.target.value)}
+                  style={inputStyle} placeholder="nome@deva.com.br"/>
+              </Field>
+              <BtnPrimary type="submit" loading={loading} disabled={loading}>
+                {loading?"Enviando...":"Enviar código"}
+              </BtnPrimary>
+            </form>
+            <button onClick={onBack} style={{marginTop:18,width:"100%",textAlign:"center",border:"none",background:"none",
+              color:"#6B7280",fontSize:12.5,fontWeight:600,cursor:"pointer"}}>
+              Voltar para o login
+            </button>
+          </>
+        ):step==="code"?(
+          <>
+            <h1 style={{fontSize:22,fontWeight:800,color:"#111827",margin:"0 0 8px",textAlign:"center"}}>Digite o código</h1>
+            <p style={{fontSize:13,color:"#6B7280",margin:"0 0 24px",textAlign:"center",lineHeight:1.6}}>
+              Se <strong>{email}</strong> tiver uma conta, um código de 6 dígitos foi enviado. Ele expira em 10 minutos.
+            </p>
+            <ErrorBox>{error}</ErrorBox>
+            <form onSubmit={confirmarCodigo} style={{display:"flex",flexDirection:"column",gap:16}}>
+              <Field label="Código de verificação" required>
+                <input inputMode="numeric" maxLength={6} required value={code}
+                  onChange={e=>setCode(e.target.value.replace(/\D/g,""))}
+                  style={{...inputStyle,textAlign:"center",fontSize:22,fontWeight:800,letterSpacing:"6px",fontFamily:"monospace"}}
+                  placeholder="000000"/>
+              </Field>
+              <BtnPrimary type="submit" loading={loading} disabled={loading}>
+                {loading?"Verificando...":"Confirmar código"}
+              </BtnPrimary>
+            </form>
+            <div style={{display:"flex",justifyContent:"space-between",marginTop:18}}>
+              <button onClick={()=>{setStep("email");setError("");}} style={{border:"none",background:"none",
+                color:"#6B7280",fontSize:12.5,fontWeight:600,cursor:"pointer",padding:0}}>
+                Trocar e-mail
+              </button>
+              <button onClick={pedirCodigo} disabled={loading} style={{border:"none",background:"none",
+                color:BLUE,fontSize:12.5,fontWeight:700,cursor:"pointer",padding:0}}>
+                Reenviar código
+              </button>
+            </div>
+          </>
         ):(
           <>
             <h1 style={{fontSize:22,fontWeight:800,color:"#111827",margin:"0 0 8px",textAlign:"center"}}>Nova senha</h1>
             <p style={{fontSize:13,color:"#6B7280",margin:"0 0 24px",textAlign:"center",lineHeight:1.6}}>
-              Defina uma nova senha para acessar o sistema.
+              Código confirmado. Defina sua nova senha.
             </p>
             <ErrorBox>{error}</ErrorBox>
-            <form onSubmit={handleSubmit} style={{display:"flex",flexDirection:"column",gap:16}}>
+            <form onSubmit={salvarNovaSenha} style={{display:"flex",flexDirection:"column",gap:16}}>
               <Field label="Nova senha" required>
                 <div style={{position:"relative"}}>
                   <input type={showPass?"text":"password"} required value={password} onChange={e=>setPassword(e.target.value)}
@@ -618,6 +709,71 @@ function ResetPasswordScreen(){
             </form>
           </>
         )}
+      </div>
+    </div>
+  );
+}
+
+// Tela obrigatória, sem como pular ou fechar — aparece quando a pessoa loga com uma senha
+// temporária gerada por um admin (Gestão de Usuários). Só depois de trocar é que o resto do
+// app carrega (initUser roda de novo, dessa vez com must_change_password já false).
+function TrocaSenhaObrigatoriaScreen({profile,onDone}){
+  const[password,setPassword]=useState("");
+  const[confirm,setConfirm]=useState("");
+  const[showPass,setShowPass]=useState(false);
+  const[showConfirm,setShowConfirm]=useState(false);
+  const[loading,setLoading]=useState(false);
+  const[error,setError]=useState("");
+
+  async function handleSubmit(e){
+    e.preventDefault();
+    if(password.length<8){setError("A senha deve ter pelo menos 8 caracteres.");return;}
+    if(password!==confirm){setError("As senhas não coincidem.");return;}
+    setLoading(true);setError("");
+    const{error:updErr}=await supabase.auth.updateUser({password});
+    if(updErr){setLoading(false);setError(updErr.message||"Não foi possível trocar a senha.");return;}
+    await supabase.from("profiles").update({must_change_password:false}).eq("id",profile.id);
+    setLoading(false);
+    onDone();
+  }
+
+  return(
+    <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#F8FAFC",padding:"24px 20px"}}>
+      <div style={{width:"100%",maxWidth:400,background:"#fff",borderRadius:20,border:"1px solid #F1F5F9",
+        boxShadow:"0 12px 48px rgba(15,23,42,.08)",padding:"40px 32px"}}>
+        <div style={{display:"flex",justifyContent:"center",marginBottom:28}}><Logo color="#0A0A0B" height={18}/></div>
+        <h1 style={{fontSize:22,fontWeight:800,color:"#111827",margin:"0 0 8px",textAlign:"center"}}>Crie sua nova senha</h1>
+        <p style={{fontSize:13,color:"#6B7280",margin:"0 0 24px",textAlign:"center",lineHeight:1.6}}>
+          Olá, {profile.name}. Sua senha foi redefinida por um administrador — antes de continuar, defina uma senha só sua.
+        </p>
+        <ErrorBox>{error}</ErrorBox>
+        <form onSubmit={handleSubmit} style={{display:"flex",flexDirection:"column",gap:16}}>
+          <Field label="Nova senha" required>
+            <div style={{position:"relative"}}>
+              <input type={showPass?"text":"password"} required value={password} onChange={e=>setPassword(e.target.value)}
+                style={{...inputStyle,paddingRight:44}} placeholder="Mínimo 8 caracteres"/>
+              <button type="button" tabIndex={-1} onClick={()=>setShowPass(v=>!v)}
+                style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",border:"none",
+                  background:"none",cursor:"pointer",padding:0,color:"#9CA3AF"}}>
+                {showPass?<EyeOff size={15}/>:<EyeIcon size={15}/>}
+              </button>
+            </div>
+          </Field>
+          <Field label="Confirmar nova senha" required>
+            <div style={{position:"relative"}}>
+              <input type={showConfirm?"text":"password"} required value={confirm} onChange={e=>setConfirm(e.target.value)}
+                style={{...inputStyle,paddingRight:44}} placeholder="Repita a senha"/>
+              <button type="button" tabIndex={-1} onClick={()=>setShowConfirm(v=>!v)}
+                style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",border:"none",
+                  background:"none",cursor:"pointer",padding:0,color:"#9CA3AF"}}>
+                {showConfirm?<EyeOff size={15}/>:<EyeIcon size={15}/>}
+              </button>
+            </div>
+          </Field>
+          <BtnPrimary type="submit" loading={loading} disabled={loading}>
+            {loading?"Salvando...":"Salvar e continuar"}
+          </BtnPrimary>
+        </form>
       </div>
     </div>
   );
@@ -3924,12 +4080,12 @@ function GestaoUsuariosView({profile,filiais}){
 
   async function resetSenha(u){
     if(semAcessoReal(u))return; // reforço: nunca dispara pra conta sem acesso real, mesmo se algo chamar isso fora do botão
-    if(!window.confirm(`Enviar e-mail de redefinição de senha para ${u.name} (${u.email})?`))return;
+    if(!window.confirm(`Gerar uma senha temporária e redefinir o acesso de ${u.name} (${u.email})? A pessoa vai precisar trocar a senha no próximo login.`))return;
     setErroAcao("");
     const{data,error}=await supabase.functions.invoke("send-email",{
-      body:{emailType:"password_reset",userId:u.id},
+      body:{emailType:"admin_reset_temp_password",userId:u.id},
     });
-    if(error||!data?.ok){setErroAcao(data?.error||error?.message||"Falha ao enviar e-mail de redefinição.");return;}
+    if(error||!data?.ok){setErroAcao(data?.error||error?.message||"Falha ao redefinir a senha.");return;}
     setEmailResetInfo({email:u.email});
   }
 
@@ -4130,12 +4286,13 @@ function GestaoUsuariosView({profile,filiais}){
       {editando&&<ModalUsuario filiais={filiais} profile={profile} editando={editando}
         onClose={()=>setEditando(null)} onSaved={()=>{setEditando(null);load();}}/>}
       {emailResetInfo&&(
-        <Modal title="E-mail enviado" onClose={()=>setEmailResetInfo(null)} footer={<BtnPrimary onClick={()=>setEmailResetInfo(null)}>Concluído</BtnPrimary>}>
+        <Modal title="Senha redefinida" onClose={()=>setEmailResetInfo(null)} footer={<BtnPrimary onClick={()=>setEmailResetInfo(null)}>Concluído</BtnPrimary>}>
           <p style={{fontSize:13,color:"#374151",lineHeight:1.6}}>
-            Um e-mail com o link de redefinição de senha foi enviado para <strong>{emailResetInfo.email}</strong>.
-            O próprio usuário deve abrir o link e definir a nova senha — ela não passa por você em nenhum momento.
+            Uma senha temporária foi gerada e enviada por e-mail pra você e pra <strong>{emailResetInfo.email}</strong>.
           </p>
-          <p style={{fontSize:12,color:"#9CA3AF",marginTop:10}}>O link expira em 1 hora.</p>
+          <p style={{fontSize:12,color:"#9CA3AF",marginTop:10}}>
+            No próximo login, a pessoa vai ser obrigada a criar uma senha nova antes de acessar o sistema.
+          </p>
         </Modal>
       )}
     </>
@@ -4701,7 +4858,7 @@ function ConfiguracoesView({profile,filiais,categorias,pessoas,reloadFiliais,rel
    APP
    ══════════════════════════════════════════════════════════════ */
 function App(){
-  const[status,setStatus]=useState(_RESET_TOKEN?"reset_password":"loading");
+  const[status,setStatus]=useState("loading");
   const[profile,setProfile]=useState(null);
   const[filiais,setFiliais]=useState([]);
   const[categorias,setCategorias]=useState([]);
@@ -4741,6 +4898,13 @@ function App(){
       setStatus("login");
       return;
     }
+    // Senha temporária gerada por um admin (Gestão de Usuários) — obrigatório trocar antes de
+    // usar o sistema. Não carrega o resto (filiais/categorias/etc.) até isso ser resolvido.
+    if(prof.must_change_password){
+      setProfile({id:prof.id,name:prof.name,email:prof.email});
+      setStatus("must_change_password");
+      return;
+    }
     const{data:acessos}=await supabase.from("acessos_filial").select("filial_id, filial:filial_id(nome)").eq("profile_id",prof.id);
     const extras=(acessos||[]).map(a=>({id:a.filial_id,nome:a.filial?.nome}));
     const filiaisAcesso=prof.filial_id?[{id:prof.filial_id,nome:prof.filial?.nome},...extras]:extras;
@@ -4756,7 +4920,6 @@ function App(){
   }
 
   useEffect(()=>{
-    if(_RESET_TOKEN)return;
     supabase.auth.getSession().then(({data})=>{
       if(data.session)initUser(data.session);
       else setStatus("login");
@@ -4772,8 +4935,10 @@ function App(){
   }
 
   if(status==="loading")return <LoadingScreen/>;
-  if(status==="reset_password")return <ResetPasswordScreen/>;
   if(status==="login")return <LoginScreen onLoginSuccess={initUser}/>;
+  if(status==="must_change_password")return <TrocaSenhaObrigatoriaScreen profile={profile} onDone={()=>{
+    supabase.auth.getSession().then(({data})=>{if(data.session)initUser(data.session);else setStatus("login");});
+  }}/>;
   if(!profile)return <LoadingScreen/>;
 
   const markNotifRead=async(id)=>{
