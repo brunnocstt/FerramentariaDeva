@@ -717,13 +717,14 @@ function ForgotPasswordFlow({onBack}){
 // Tela obrigatória, sem como pular ou fechar — aparece quando a pessoa loga com uma senha
 // temporária gerada por um admin (Gestão de Usuários). Só depois de trocar é que o resto do
 // app carrega (initUser roda de novo, dessa vez com must_change_password já false).
-function TrocaSenhaObrigatoriaScreen({profile,onDone}){
+function TrocaSenhaObrigatoriaScreen({profile,onDone,onSessionExpired}){
   const[password,setPassword]=useState("");
   const[confirm,setConfirm]=useState("");
   const[showPass,setShowPass]=useState(false);
   const[showConfirm,setShowConfirm]=useState(false);
   const[loading,setLoading]=useState(false);
   const[error,setError]=useState("");
+  const[sessaoExpirada,setSessaoExpirada]=useState(false);
 
   async function handleSubmit(e){
     e.preventDefault();
@@ -731,7 +732,17 @@ function TrocaSenhaObrigatoriaScreen({profile,onDone}){
     if(password!==confirm){setError("As senhas não coincidem.");return;}
     setLoading(true);setError("");
     const{error:updErr}=await supabase.auth.updateUser({password});
-    if(updErr){setLoading(false);setError(updErr.message||"Não foi possível trocar a senha.");return;}
+    if(updErr){
+      // Acontece quando a sessão morreu no meio do caminho — ex.: um admin que redefine a
+      // PRÓPRIA senha derruba a sessão atual na hora (a API do Supabase invalida sessões
+      // existentes ao trocar senha), e a pessoa só descobre isso ao tentar salvar aqui.
+      // Sem essa saída, ela ficava presa nessa tela pra sempre (o "must_change_password"
+      // nunca é limpo porque a troca nunca completa de verdade).
+      setLoading(false);
+      await supabase.auth.signOut();
+      setSessaoExpirada(true);
+      return;
+    }
     await supabase.from("profiles").update({must_change_password:false}).eq("id",profile.id);
     setLoading(false);
     onDone();
@@ -742,38 +753,51 @@ function TrocaSenhaObrigatoriaScreen({profile,onDone}){
       <div style={{width:"100%",maxWidth:400,background:"#fff",borderRadius:20,border:"1px solid #F1F5F9",
         boxShadow:"0 12px 48px rgba(15,23,42,.08)",padding:"40px 32px"}}>
         <div style={{display:"flex",justifyContent:"center",marginBottom:28}}><Logo color="#0A0A0B" height={18}/></div>
-        <h1 style={{fontSize:22,fontWeight:800,color:"#111827",margin:"0 0 8px",textAlign:"center"}}>Crie sua nova senha</h1>
-        <p style={{fontSize:13,color:"#6B7280",margin:"0 0 24px",textAlign:"center",lineHeight:1.6}}>
-          Olá, {profile.name}. Sua senha foi redefinida por um administrador — antes de continuar, defina uma senha só sua.
-        </p>
-        <ErrorBox>{error}</ErrorBox>
-        <form onSubmit={handleSubmit} style={{display:"flex",flexDirection:"column",gap:16}}>
-          <Field label="Nova senha" required>
-            <div style={{position:"relative"}}>
-              <input type={showPass?"text":"password"} required value={password} onChange={e=>setPassword(e.target.value)}
-                style={{...inputStyle,paddingRight:44}} placeholder="Mínimo 8 caracteres"/>
-              <button type="button" tabIndex={-1} onClick={()=>setShowPass(v=>!v)}
-                style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",border:"none",
-                  background:"none",cursor:"pointer",padding:0,color:"#9CA3AF"}}>
-                {showPass?<EyeOff size={15}/>:<EyeIcon size={15}/>}
-              </button>
-            </div>
-          </Field>
-          <Field label="Confirmar nova senha" required>
-            <div style={{position:"relative"}}>
-              <input type={showConfirm?"text":"password"} required value={confirm} onChange={e=>setConfirm(e.target.value)}
-                style={{...inputStyle,paddingRight:44}} placeholder="Repita a senha"/>
-              <button type="button" tabIndex={-1} onClick={()=>setShowConfirm(v=>!v)}
-                style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",border:"none",
-                  background:"none",cursor:"pointer",padding:0,color:"#9CA3AF"}}>
-                {showConfirm?<EyeOff size={15}/>:<EyeIcon size={15}/>}
-              </button>
-            </div>
-          </Field>
-          <BtnPrimary type="submit" loading={loading} disabled={loading}>
-            {loading?"Salvando...":"Salvar e continuar"}
-          </BtnPrimary>
-        </form>
+        {sessaoExpirada?(
+          <div style={{textAlign:"center"}}>
+            <div style={{width:52,height:52,borderRadius:14,background:"#FFFBEB",display:"flex",alignItems:"center",
+              justifyContent:"center",margin:"0 auto 18px"}}><AlertTriangle size={24} color="#B45309"/></div>
+            <h2 style={{fontSize:18,fontWeight:800,color:"#111827",margin:"0 0 8px"}}>Sua sessão expirou</h2>
+            <p style={{fontSize:13,color:"#6B7280",margin:"0 0 24px",lineHeight:1.6}}>
+              Isso é esperado — sua sessão anterior foi encerrada quando a senha temporária foi gerada.
+              Faça login de novo com a senha temporária que você recebeu por e-mail.
+            </p>
+            <BtnPrimary onClick={onSessionExpired}>Ir para o login</BtnPrimary>
+          </div>
+        ):(<>
+          <h1 style={{fontSize:22,fontWeight:800,color:"#111827",margin:"0 0 8px",textAlign:"center"}}>Crie sua nova senha</h1>
+          <p style={{fontSize:13,color:"#6B7280",margin:"0 0 24px",textAlign:"center",lineHeight:1.6}}>
+            Olá, {profile.name}. Sua senha foi redefinida por um administrador — antes de continuar, defina uma senha só sua.
+          </p>
+          <ErrorBox>{error}</ErrorBox>
+          <form onSubmit={handleSubmit} style={{display:"flex",flexDirection:"column",gap:16}}>
+            <Field label="Nova senha" required>
+              <div style={{position:"relative"}}>
+                <input type={showPass?"text":"password"} required value={password} onChange={e=>setPassword(e.target.value)}
+                  style={{...inputStyle,paddingRight:44}} placeholder="Mínimo 8 caracteres"/>
+                <button type="button" tabIndex={-1} onClick={()=>setShowPass(v=>!v)}
+                  style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",border:"none",
+                    background:"none",cursor:"pointer",padding:0,color:"#9CA3AF"}}>
+                  {showPass?<EyeOff size={15}/>:<EyeIcon size={15}/>}
+                </button>
+              </div>
+            </Field>
+            <Field label="Confirmar nova senha" required>
+              <div style={{position:"relative"}}>
+                <input type={showConfirm?"text":"password"} required value={confirm} onChange={e=>setConfirm(e.target.value)}
+                  style={{...inputStyle,paddingRight:44}} placeholder="Repita a senha"/>
+                <button type="button" tabIndex={-1} onClick={()=>setShowConfirm(v=>!v)}
+                  style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",border:"none",
+                    background:"none",cursor:"pointer",padding:0,color:"#9CA3AF"}}>
+                  {showConfirm?<EyeOff size={15}/>:<EyeIcon size={15}/>}
+                </button>
+              </div>
+            </Field>
+            <BtnPrimary type="submit" loading={loading} disabled={loading}>
+              {loading?"Salvando...":"Salvar e continuar"}
+            </BtnPrimary>
+          </form>
+        </>)}
       </div>
     </div>
   );
@@ -4080,12 +4104,24 @@ function GestaoUsuariosView({profile,filiais}){
 
   async function resetSenha(u){
     if(semAcessoReal(u))return; // reforço: nunca dispara pra conta sem acesso real, mesmo se algo chamar isso fora do botão
-    if(!window.confirm(`Gerar uma senha temporária e redefinir o acesso de ${u.name} (${u.email})? A pessoa vai precisar trocar a senha no próximo login.`))return;
+    // Redefinir a PRÓPRIA senha invalida a sessão atual na hora (é assim que o Supabase Auth
+    // funciona) — sem avisar e sem encerrar a sessão de propósito, a pessoa continuava "logada"
+    // numa sessão já morta e só descobria isso com um erro confuso mais tarde.
+    const ehVoceMesmo=u.id===profile.id;
+    const msg=ehVoceMesmo
+      ?`Isso vai gerar uma senha temporária pra SUA PRÓPRIA conta e encerrar sua sessão atual agora mesmo. Você vai precisar fazer login de novo com a senha temporária enviada por e-mail. Confirma?`
+      :`Gerar uma senha temporária e redefinir o acesso de ${u.name} (${u.email})? A pessoa vai precisar trocar a senha no próximo login.`;
+    if(!window.confirm(msg))return;
     setErroAcao("");
     const{data,error}=await supabase.functions.invoke("send-email",{
       body:{emailType:"admin_reset_temp_password",userId:u.id},
     });
     if(error||!data?.ok){setErroAcao(data?.error||error?.message||"Falha ao redefinir a senha.");return;}
+    if(ehVoceMesmo){
+      await supabase.auth.signOut();
+      window.location.href=window.location.origin+window.location.pathname;
+      return;
+    }
     setEmailResetInfo({email:u.email});
   }
 
@@ -4936,7 +4972,7 @@ function App(){
 
   if(status==="loading")return <LoadingScreen/>;
   if(status==="login")return <LoginScreen onLoginSuccess={initUser}/>;
-  if(status==="must_change_password")return <TrocaSenhaObrigatoriaScreen profile={profile} onDone={()=>{
+  if(status==="must_change_password")return <TrocaSenhaObrigatoriaScreen profile={profile} onSessionExpired={()=>{setProfile(null);setStatus("login");}} onDone={()=>{
     supabase.auth.getSession().then(({data})=>{if(data.session)initUser(data.session);else setStatus("login");});
   }}/>;
   if(!profile)return <LoadingScreen/>;
