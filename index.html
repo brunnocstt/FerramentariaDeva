@@ -112,7 +112,7 @@ import{
   Clock,CheckCircle2,Pencil,Trash2,Menu,Filter,Wrench,PackageCheck,
   ClipboardList,ArrowLeftRight,Hash,MapPin,AlertTriangle,LayoutDashboard,
   FileText,UserCheck,PackagePlus,PackageX,Ban,History,Tag,ScanLine,FileSpreadsheet,
-  Shield,ToggleRight,ToggleLeft,Power
+  Shield,ToggleRight,ToggleLeft,Power,Copy
 }from "https://esm.sh/lucide-react?deps=react@18";
 
 /* ── SUPABASE ────────────────────────────────────── */
@@ -4122,7 +4122,7 @@ function GestaoUsuariosView({profile,filiais}){
       window.location.href=window.location.origin+window.location.pathname;
       return;
     }
-    setEmailResetInfo({email:u.email});
+    setEmailResetInfo({email:u.email,tempPassword:data.tempPassword});
   }
 
   const listaFiltrada=useMemo(()=>{
@@ -4326,6 +4326,25 @@ function GestaoUsuariosView({profile,filiais}){
           <p style={{fontSize:13,color:"#374151",lineHeight:1.6}}>
             Uma senha temporária foi gerada e enviada por e-mail pra você e pra <strong>{emailResetInfo.email}</strong>.
           </p>
+          {emailResetInfo.tempPassword&&(
+            <>
+              <p style={{fontSize:11,fontWeight:700,color:"#9CA3AF",textTransform:"uppercase",letterSpacing:".05em",margin:"14px 0 6px"}}>
+                Reforço — caso o e-mail não chegue pra essa pessoa
+              </p>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <div style={{flex:1,padding:"10px 12px",borderRadius:9,background:"#F9FAFB",border:"1px solid #F1F5F9",
+                  fontFamily:"monospace",fontSize:14,fontWeight:700,color:"#111827",letterSpacing:".5px",wordBreak:"break-all"}}>
+                  {emailResetInfo.tempPassword}
+                </div>
+                <button type="button" onClick={()=>navigator.clipboard?.writeText(emailResetInfo.tempPassword)}
+                  title="Copiar senha" style={{flexShrink:0,width:36,height:36,borderRadius:9,border:"1px solid #E5E7EB",
+                    background:"#fff",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",color:"#6B7280"}}>
+                  <Copy size={14}/>
+                </button>
+              </div>
+              <p style={{fontSize:11,color:"#9CA3AF",marginTop:6}}>Pode repassar direto pra pessoa (verbal, WhatsApp etc.) se o e-mail não chegar. Não vai aparecer de novo.</p>
+            </>
+          )}
           <p style={{fontSize:12,color:"#9CA3AF",marginTop:10}}>
             No próximo login, a pessoa vai ser obrigada a criar uma senha nova antes de acessar o sistema.
           </p>
