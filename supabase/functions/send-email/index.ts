@@ -384,7 +384,10 @@ serve(async (req) => {
            ${SIGNOFF}`
         );
       }
-      return ok();
+      // Devolve a senha temporária pra tela do admin também — reforço caso o e-mail não
+      // chegue pra essa pessoa em particular (caixa cheia, filtro bloqueando só ela, etc.).
+      // Só o próprio admin autenticado que fez a chamada recebe essa resposta.
+      return ok({ tempPassword });
     }
 
     return err("emailType desconhecido.");
