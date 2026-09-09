@@ -1499,25 +1499,33 @@ function ChecklistEspeciferView({profile,filiais}){
                     {a.nota!=null&&<div style={{fontSize:12,color:"#9CA3AF"}}>nota {a.nota}</div>}
                   </button>
                   {aberto&&(
-                    <div style={{padding:"0 16px 16px 42px",borderTop:"1px solid #F8FAFC"}}>
-                      <div style={{marginTop:12}}>
-                        {a.pdf_path?(
-                          <BtnSecondary onClick={()=>baixarPdf(a)}><Download size={14}/>Baixar PDF do relatório</BtnSecondary>
-                        ):isAdmin?(
-                          <>
-                            <input type="file" id={"pdf-upload-"+a.id} accept="application/pdf" style={{display:"none"}}
-                              onChange={e=>enviarPdf(a,e.target.files?.[0])} disabled={enviandoPdf===a.id}/>
-                            <label htmlFor={"pdf-upload-"+a.id} style={{display:"inline-flex",alignItems:"center",gap:8,
-                              padding:"9px 14px",borderRadius:10,border:"1px solid #E5E7EB",background:"#fff",
-                              fontSize:13,fontWeight:700,color:"#374151",cursor:enviandoPdf===a.id?"default":"pointer"}}>
-                              {enviandoPdf===a.id?<span className="spin" style={{display:"flex"}}><RefreshCw size={14}/></span>:<Upload size={14}/>}
-                              {enviandoPdf===a.id?"Enviando...":"Enviar PDF do relatório"}
-                            </label>
-                          </>
-                        ):(
-                          <p style={{fontSize:12,color:"#9CA3AF",margin:0}}>PDF do relatório ainda não foi anexado.</p>
-                        )}
-                      </div>
+                    <div style={{padding:"0 16px 16px 42px",borderTop:"1px solid #F8FAFC",position:"relative"}}>
+                      {a.pdf_path&&(
+                        <button onClick={()=>baixarPdf(a)} title="Baixar PDF do relatório" type="button"
+                          style={{position:"absolute",top:12,right:16,width:30,height:30,borderRadius:8,
+                            border:"1px solid #E5E7EB",background:"#fff",display:"flex",alignItems:"center",
+                            justifyContent:"center",cursor:"pointer",color:"#374151"}}>
+                          <Download size={15}/>
+                        </button>
+                      )}
+                      {!a.pdf_path&&(
+                        <div style={{marginTop:12}}>
+                          {isAdmin?(
+                            <>
+                              <input type="file" id={"pdf-upload-"+a.id} accept="application/pdf" style={{display:"none"}}
+                                onChange={e=>enviarPdf(a,e.target.files?.[0])} disabled={enviandoPdf===a.id}/>
+                              <label htmlFor={"pdf-upload-"+a.id} style={{display:"inline-flex",alignItems:"center",gap:8,
+                                padding:"9px 14px",borderRadius:10,border:"1px solid #E5E7EB",background:"#fff",
+                                fontSize:13,fontWeight:700,color:"#374151",cursor:enviandoPdf===a.id?"default":"pointer"}}>
+                                {enviandoPdf===a.id?<span className="spin" style={{display:"flex"}}><RefreshCw size={14}/></span>:<Upload size={14}/>}
+                                {enviandoPdf===a.id?"Enviando...":"Enviar PDF do relatório"}
+                              </label>
+                            </>
+                          ):(
+                            <p style={{fontSize:12,color:"#9CA3AF",margin:0}}>PDF do relatório ainda não foi anexado.</p>
+                          )}
+                        </div>
+                      )}
                       {a.inconformidades===0?(
                         <p style={{fontSize:12.5,color:"#059669",fontWeight:700,margin:"12px 0 0"}}>Nenhuma ferramenta não encontrada nessa auditoria.</p>
                       ):naoEncontradas.length===0?(
