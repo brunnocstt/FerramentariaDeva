@@ -1657,14 +1657,20 @@ function ModalNovaFerramenta({onClose,onSaved,filiais,categorias,catalogos,profi
 
     if(controleIndividual){
       if(!codigo){setError("Preencha o código da unidade.");return;}
+      // Ferramentas do checklist Especifer usam o código do fabricante — igual pra todas as
+      // unidades físicas idênticas. Dá pra cadastrar mais de uma de uma vez com o mesmo código
+      // (não é mais exigido um código único por unidade, cada linha se distingue por si mesma).
+      const qtdUnidades=quantidade.trim()?parseInt(quantidade,10):1;
+      if(!qtdUnidades||qtdUnidades<=0){setError("Informe uma quantidade válida.");return;}
       setLoading(true);
-      const{error:err}=await supabase.from("ferramentas_unidade").insert({
+      const linhas=Array.from({length:qtdUnidades},()=>({
         catalogo_id:finalCatalogoId,filial_id:filialId,codigo,
         data_proxima_afericao:requerAfericao?(dataProximaAfericao||null):null,observacoes:observacoes||null,
         localizacao:localizacao.trim()||null,
         numero_licenca:requerLicenca?(numeroLicenca.trim()||null):null,
         data_validade_licenca:requerLicenca?(dataValidadeLicenca||null):null,
-      });
+      }));
+      const{error:err}=await supabase.from("ferramentas_unidade").insert(linhas);
       setLoading(false);
       if(err){setError(traduzErro(err));return;}
     }else{
@@ -1699,10 +1705,14 @@ function ModalNovaFerramenta({onClose,onSaved,filiais,categorias,catalogos,profi
       <ErrorBox>{error}</ErrorBox>
       <div style={{display:"flex",flexDirection:"column",gap:14}}>
         {catalogoPreSelecionado&&!editandoUnidade&&(
-          <div style={{padding:12,borderRadius:10,background:"#FEF2F2",border:"1px solid #FEE2E2"}}>
-            <div style={{fontSize:11,color:"#9CA3AF",fontWeight:700,textTransform:"uppercase",marginBottom:4}}>Cadastrando alocação pra</div>
+          <div style={{padding:12,borderRadius:10,
+            background:catalogoPreSelecionado.pendente_alocacao?"#FEF2F2":"#F9FAFB",
+            border:`1px solid ${catalogoPreSelecionado.pendente_alocacao?"#FEE2E2":"#F1F5F9"}`}}>
+            <div style={{fontSize:11,color:"#9CA3AF",fontWeight:700,textTransform:"uppercase",marginBottom:4}}>
+              {catalogoPreSelecionado.pendente_alocacao?"Cadastrando alocação pra":"Adicionando unidade pra"}
+            </div>
             <div style={{fontSize:14,fontWeight:700,color:"#111827",display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
-              {catalogoPreSelecionado.nome}<BadgePendenteAlocacao/>
+              {catalogoPreSelecionado.nome}{catalogoPreSelecionado.pendente_alocacao&&<BadgePendenteAlocacao/>}
             </div>
           </div>
         )}
@@ -1711,7 +1721,7 @@ function ModalNovaFerramenta({onClose,onSaved,filiais,categorias,catalogos,profi
             <Field label="Nome da nova ferramenta" required>
               <input value={novoTipoNome} onChange={e=>setNovoTipoNome(e.target.value)} style={inputStyle} placeholder="Ex.: Torquímetro 1/2&quot;"/>
             </Field>
-            <Field label="Categoria" hint={novoTipoCategoriaId?(requerAfericao?"Essa categoria exige controle de aferição — cada unidade terá código próprio.":controleIndividual?"Cada unidade terá código próprio.":"Controlado por quantidade (sem código individual)."):null}>
+            <Field label="Categoria" hint={novoTipoCategoriaId?(requerAfericao?"Essa categoria exige controle de aferição — cada unidade tem seu próprio registro (o código pode repetir).":controleIndividual?"Cada unidade tem seu próprio registro (o código pode repetir).":"Controlado por quantidade (sem código individual)."):null}>
               <select value={novoTipoCategoriaId} onChange={e=>setNovoTipoCategoriaId(e.target.value)} style={inputStyle}>
                 <option value="">Sem categoria</option>
                 {categorias.map(c=><option key={c.id} value={c.id}>{c.nome}</option>)}
@@ -1735,7 +1745,7 @@ function ModalNovaFerramenta({onClose,onSaved,filiais,categorias,catalogos,profi
               </select>
             </Field>
             {catalogoId&&<div style={{fontSize:12,color:"#6B7280"}}>
-              {controleIndividual?"Cada unidade terá código próprio.":"Controlado por quantidade (sem código individual)."}
+              {controleIndividual?"Cada unidade tem seu próprio registro (o código pode repetir).":"Controlado por quantidade (sem código individual)."}
               {requerAfericao&&" Exige controle de aferição."}
             </div>}
             {isAdminGeral&&<button type="button" onClick={()=>setModoNovoTipo(true)}
@@ -1754,9 +1764,16 @@ function ModalNovaFerramenta({onClose,onSaved,filiais,categorias,catalogos,profi
         </Field>
 
         {controleIndividual?(
-          <Field label="Código de identificação da unidade" required>
-            <input value={codigo} onChange={e=>setCodigo(e.target.value)} style={inputStyle} placeholder="Ex.: FER-0123"/>
-          </Field>
+          <>
+            <Field label="Código" required hint="Pode repetir — se a ferramenta não tem número de série (ex.: código do fabricante), várias unidades idênticas podem usar o mesmo código.">
+              <input value={codigo} onChange={e=>setCodigo(e.target.value)} style={inputStyle} placeholder="Ex.: FER-0123"/>
+            </Field>
+            {!editandoUnidade&&(
+              <Field label="Quantidade" hint="Quantas unidades com esse código cadastrar de uma vez. Deixe em branco pra 1.">
+                <input type="number" min="1" value={quantidade} onChange={e=>setQuantidade(e.target.value)} style={inputStyle} placeholder="1"/>
+              </Field>
+            )}
+          </>
         ):(!editandoUnidade&&
           <Field label="Quantidade a adicionar ao estoque" required hint="Se já existir estoque desse tipo nessa filial, soma à quantidade atual.">
             <input type="number" min="1" value={quantidade} onChange={e=>setQuantidade(e.target.value)} style={inputStyle} placeholder="Ex.: 5"/>
@@ -1858,7 +1875,7 @@ function ModalAcao({ferramenta,tipo,onClose,onDone,pessoasFilial}){
   );
 }
 
-function FerramentaDetalheModal({ferramenta,onClose,onChanged,profile,filiais,categorias,catalogos,pessoasFilial}){
+function FerramentaDetalheModal({ferramenta,onClose,onChanged,profile,filiais,categorias,catalogos,pessoasFilial,onAdicionarMais}){
   const[historico,setHistorico]=useState([]);
   const[loadingHist,setLoadingHist]=useState(true);
   const[acao,setAcao]=useState(null);
@@ -1930,6 +1947,12 @@ function FerramentaDetalheModal({ferramenta,onClose,onChanged,profile,filiais,ca
           <div style={{fontSize:12,color:"#6B7280",marginTop:4,display:"flex",alignItems:"center",gap:5}}>
             <MapPin size={12}/>{filialNome}{categoriaObj?` · ${categoriaObj.nome}`:""}
           </div>
+          {isAdmin&&onAdicionarMais&&(
+            <button type="button" onClick={onAdicionarMais}
+              style={{border:"none",background:"none",color:BLUE,fontSize:12,fontWeight:700,cursor:"pointer",padding:0,marginTop:6}}>
+              + Adicionar mais unidades com esse código
+            </button>
+          )}
         </div>
         <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:8,flexShrink:0}}>
           <StatusBadge status={ferramenta.status}/>
@@ -2354,11 +2377,14 @@ function ModalEstoqueDetalhe({estoque,onClose,onChanged,profile,filiais}){
   );
 }
 
-function ModalGrupoUnidades({grupo,categorias,onClose,onSelectUnidade}){
+function ModalGrupoUnidades({grupo,categorias,onClose,onSelectUnidade,onAdicionarMais,isAdmin}){
   const categoriaObj=categorias.find(c=>c.id===grupo.categoriaId);
   const disponiveis=grupo.itens.filter(u=>u.status==="disponivel").length;
   return(
-    <Modal title={grupo.nome} onClose={onClose} width={560}>
+    <Modal title={grupo.nome} onClose={onClose} width={560}
+      footer={isAdmin&&onAdicionarMais&&(
+        <BtnSecondary onClick={onAdicionarMais}><Plus size={14}/>Adicionar mais unidades</BtnSecondary>
+      )}>
       <div style={{marginBottom:16,display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
         <div style={{fontSize:12,color:"#6B7280",display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
           {categoriaObj?.nome||"—"} · {grupo.itens.length} unidade(s) cadastrada(s)
@@ -2550,7 +2576,7 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
   const[grupoSelecionado,setGrupoSelecionado]=useState(null);
   const[estoqueSelecionado,setEstoqueSelecionado]=useState(null);
   const[novaAberta,setNovaAberta]=useState(false);
-  const[catalogoParaAlocar,setCatalogoParaAlocar]=useState(null);
+  const[catalogoParaAdicionar,setCatalogoParaAdicionar]=useState(null);
   const[retiradaAberta,setRetiradaAberta]=useState(false);
   const[devolucaoAberta,setDevolucaoAberta]=useState(false);
   const[exportarAberto,setExportarAberto]=useState(false);
@@ -2870,7 +2896,7 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
                   <span style={{fontSize:14,fontWeight:700,color:"#111827"}}>{c.nome}</span>
                   <BadgePendenteAlocacao/>
                 </div>
-                {isAdmin&&<BtnSecondary onClick={()=>setCatalogoParaAlocar(c)}><MapPin size={14}/>Cadastrar alocação</BtnSecondary>}
+                {isAdmin&&<BtnSecondary onClick={()=>setCatalogoParaAdicionar(c)}><MapPin size={14}/>Cadastrar alocação</BtnSecondary>}
               </div>
             ))}
           </div>
@@ -2883,19 +2909,29 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
         onChanged={()=>{load();
           supabase.from("ferramentas_unidade").select("*, colaborador_atual:colaborador_atual_id(name), catalogo:catalogo_id(nome,categoria_id,obrigatoria,requer_licenca,pendente_alocacao)").eq("id",selecionada.id).single()
             .then(({data})=>{if(data)setSelecionada(data);});
+        }}
+        onAdicionarMais={()=>{
+          const catalogo=catalogos.find(c=>c.id===selecionada.catalogo_id);
+          setSelecionada(null);
+          setCatalogoParaAdicionar(catalogo||{id:selecionada.catalogo_id,nome:selecionada.catalogo?.nome});
         }}/>}
       {estoqueSelecionado&&<ModalEstoqueDetalhe estoque={estoqueSelecionado} profile={profile} filiais={filiais}
         onClose={()=>setEstoqueSelecionado(null)}
         onChanged={()=>{load();setEstoqueSelecionado(null);}}/>}
-      {grupoSelecionado&&<ModalGrupoUnidades grupo={grupoSelecionado} categorias={categorias}
+      {grupoSelecionado&&<ModalGrupoUnidades grupo={grupoSelecionado} categorias={categorias} isAdmin={isAdmin}
         onClose={()=>setGrupoSelecionado(null)}
-        onSelectUnidade={u=>{setGrupoSelecionado(null);setSelecionada(u);}}/>}
+        onSelectUnidade={u=>{setGrupoSelecionado(null);setSelecionada(u);}}
+        onAdicionarMais={()=>{
+          const catalogo=catalogos.find(c=>c.id===grupoSelecionado.catalogoId);
+          setGrupoSelecionado(null);
+          setCatalogoParaAdicionar(catalogo||{id:grupoSelecionado.catalogoId,nome:grupoSelecionado.nome});
+        }}/>}
       {novaAberta&&<ModalNovaFerramenta filiais={filiais} categorias={categorias} catalogos={catalogos} profile={profile}
         onClose={()=>setNovaAberta(false)} onSaved={()=>{setNovaAberta(false);reloadCatalogos&&reloadCatalogos();load();}}/>}
-      {catalogoParaAlocar&&<ModalNovaFerramenta filiais={filiais} categorias={categorias} catalogos={catalogos} profile={profile}
-        catalogoPreSelecionado={catalogoParaAlocar}
-        onClose={()=>setCatalogoParaAlocar(null)}
-        onSaved={()=>{setCatalogoParaAlocar(null);reloadCatalogos&&reloadCatalogos();load();}}/>}
+      {catalogoParaAdicionar&&<ModalNovaFerramenta filiais={filiais} categorias={categorias} catalogos={catalogos} profile={profile}
+        catalogoPreSelecionado={catalogoParaAdicionar}
+        onClose={()=>setCatalogoParaAdicionar(null)}
+        onSaved={()=>{setCatalogoParaAdicionar(null);reloadCatalogos&&reloadCatalogos();load();}}/>}
       {retiradaAberta&&<ModalNovaRetirada filiais={filiais} profile={profile}
         onClose={()=>setRetiradaAberta(false)} onFeito={load}/>}
       {devolucaoAberta&&<ModalDevolucao filiais={filiais} profile={profile}
