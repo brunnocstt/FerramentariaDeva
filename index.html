@@ -1177,6 +1177,7 @@ function DashboardView({profile,filiais}){
   const[stats,setStats]=useState(null);
   const[atingimento,setAtingimento]=useState(null);
   const[checklistFaltando,setChecklistFaltando]=useState([]);
+  const[auditoriasEspecifer,setAuditoriasEspecifer]=useState([]);
   const[loading,setLoading]=useState(true);
 
   useEffect(()=>{
@@ -1256,9 +1257,26 @@ function DashboardView({profile,filiais}){
         return{filialId:f.id,filialNome:f.nome,total:totalChecklist,disponiveis,
           pct:totalChecklist>0?Math.round(disponiveis/totalChecklist*100):null};
       });
+
+      // Resultado fechado de cada relatório oficial Especifer/Iveco (fato do dia da vistoria,
+      // não recalculado ao vivo) — diferente do "Atingimento" acima, que é estoque disponível
+      // agora. Mostra só a auditoria mais recente de cada filial.
+      const{data:audits}=await supabase.from("checklist_especifer_auditorias").select("*")
+        .in("filial_id",filiaisView.map(f=>f.id)).order("data_conclusao",{ascending:false});
+      const auditoriaPorFilial=new Map();
+      (audits||[]).forEach(a=>{if(!auditoriaPorFilial.has(a.filial_id))auditoriaPorFilial.set(a.filial_id,a);});
+      const auditsRecentes=filiaisView.map(f=>{
+        const a=auditoriaPorFilial.get(f.id);
+        if(!a)return null;
+        return{filialId:f.id,filialNome:f.nome,relatorioNumero:a.relatorio_numero,
+          dataConclusao:a.data_conclusao,totalAvaliativos:a.total_avaliativos,
+          inconformidades:a.inconformidades,confirmadas:a.total_avaliativos-a.inconformidades,nota:a.nota};
+      }).filter(Boolean);
+
       if(!cancelled){
         setAtingimento(ating);
         setChecklistFaltando((checklist||[]).filter(c=>!c.catalogo_id));
+        setAuditoriasEspecifer(auditsRecentes);
       }
       setLoading(false);
     }
@@ -1301,7 +1319,7 @@ function DashboardView({profile,filiais}){
         <div style={{background:"#fff",border:"1px solid #F1F5F9",borderRadius:14,padding:"18px 20px",marginBottom:14}}>
           <h2 style={{fontSize:15,fontWeight:800,color:"#111827",margin:"0 0 3px"}}>Atingimento de Ferramentas Obrigatórias</h2>
           <p style={{fontSize:11.5,color:"#9CA3AF",margin:"0 0 14px"}}>
-            Contra os 228 itens da checklist oficial Especifer/Iveco: quantos a filial tem disponível agora.
+            Contra os {atingimento[0]?.total||0} itens da checklist oficial Especifer/Iveco: quantos a filial tem <b>disponível agora</b> (estoque ao vivo).
           </p>
           <div style={{display:"flex",flexDirection:"column",gap:12}}>
             {atingimento.map(a=>{
@@ -1314,6 +1332,31 @@ function DashboardView({profile,filiais}){
                   </div>
                   <div style={{minWidth:130,textAlign:"right",fontSize:12.5,fontWeight:700,color:cor,flexShrink:0}}>
                     {a.disponiveis}/{a.total} · {a.pct}%
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+      {auditoriasEspecifer.length>0&&(
+        <div style={{background:"#fff",border:"1px solid #F1F5F9",borderRadius:14,padding:"18px 20px",marginBottom:14}}>
+          <h2 style={{fontSize:15,fontWeight:800,color:"#111827",margin:"0 0 3px"}}>Última Auditoria Especifer</h2>
+          <p style={{fontSize:11.5,color:"#9CA3AF",margin:"0 0 14px"}}>
+            Resultado fechado do relatório oficial do dia da vistoria — não muda com o estoque do dia a dia.
+          </p>
+          <div style={{display:"flex",flexDirection:"column",gap:12}}>
+            {auditoriasEspecifer.map(a=>{
+              const pct=a.totalAvaliativos>0?Math.round(a.confirmadas/a.totalAvaliativos*100):null;
+              const cor=pct===null?"#9CA3AF":pct>=90?"#059669":pct>=70?"#D97706":"#B91C1C";
+              return(
+                <div key={a.filialId} style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+                  <div style={{width:130,fontSize:13,fontWeight:700,color:"#374151",flexShrink:0}}>{a.filialNome}</div>
+                  <div style={{flex:1,minWidth:120,fontSize:12,color:"#9CA3AF"}}>
+                    {fmtDate(a.dataConclusao)}{a.relatorioNumero?` · relatório #${a.relatorioNumero}`:""}{a.inconformidades>0?` · ${a.inconformidades} inconformidade(s)`:""}
+                  </div>
+                  <div style={{minWidth:170,textAlign:"right",fontSize:12.5,fontWeight:700,color:cor,flexShrink:0}}>
+                    {a.confirmadas}/{a.totalAvaliativos} confirmadas · {pct}%{a.nota!=null?` · nota ${a.nota}`:""}
                   </div>
                 </div>
               );
