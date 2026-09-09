@@ -128,6 +128,11 @@ const supabase  = createClient(SUPA_URL, SUPA_ANON);
 /* ── CONSTANTES ─────────────────────────────────── */
 const BLUE="#1955FF";
 const MONTHS=["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
+// Total de ferramentas obrigatórias do programa oficial Iveco/Especifer — fixo, é o mesmo pra
+// TODA filial (não varia conforme frota/modelo atendido). Usado como denominador padrão em
+// qualquer lugar que mostre "atingimento"/conformidade do checklist, com ou sem auditoria
+// registrada ainda pra aquela filial.
+const TOTAL_OBRIGATORIAS_ESPECIFER=251;
 
 /* ── RESPONSIVO ─────────────────────────────────── */
 // Layout "mobile" (menu no rodapé, cards em vez de tabela etc.): celular sempre, e tablet só
@@ -922,6 +927,7 @@ function navItemsFor(userType){
     {id:"dashboard",label:"Dashboard",Icon:LayoutDashboard},
     {id:"ferramentas",label:"Estoque",Icon:Wrench},
     {id:"movimentacoes",label:"Movimentações",Icon:ArrowLeftRight},
+    {id:"checklist_especifer",label:"Checklists",Icon:ClipboardList},
     {id:"relatorios",label:"Relatórios",Icon:BarChart3},
     {id:"configuracoes",label:"Configurações",Icon:Settings},
   ];
@@ -1249,7 +1255,6 @@ function DashboardView({profile,filiais}){
         if(!porFilial.has(p.filial_id))porFilial.set(p.filial_id,new Set());
         porFilial.get(p.filial_id).add(p.catalogo_id);
       });
-      const totalChecklist=(checklist||[]).length;
 
       // Pra filial que já passou por uma auditoria Especifer oficial, o resultado FECHADO
       // daquele relatório manda — não o estoque calculado ao vivo. "Está no checklist, o
@@ -1257,23 +1262,21 @@ function DashboardView({profile,filiais}){
       // fisicamente no sistema ou não (isso é um problema de mapeamento interno nosso, não
       // motivo pra fingir que a ferramenta não existe). Só sem auditoria formal (outras
       // filiais) é que caímos de volta pro cálculo ao vivo (unidade/pool disponível agora).
-      const{data:audits}=await supabase.from("checklist_especifer_auditorias").select("*")
+      // O total (TOTAL_OBRIGATORIAS_ESPECIFER) é sempre o mesmo pra qualquer filial — não
+      // varia por auditoria nem por frota; só o histórico completo por filial (data, relatório,
+      // % de conformidade) fica na tela "Checklist Especifer".
+      const{data:audits}=await supabase.from("checklist_especifer_auditorias").select("filial_id,inconformidades,data_conclusao")
         .in("filial_id",filiaisView.map(f=>f.id)).order("data_conclusao",{ascending:false});
       const auditoriaPorFilial=new Map();
       (audits||[]).forEach(a=>{if(!auditoriaPorFilial.has(a.filial_id))auditoriaPorFilial.set(a.filial_id,a);});
 
       const ating=filiaisView.map(f=>{
         const auditoria=auditoriaPorFilial.get(f.id);
-        if(auditoria){
-          const total=auditoria.total_avaliativos,disponiveis=total-auditoria.inconformidades;
-          return{filialId:f.id,filialNome:f.nome,total,disponiveis,
-            pct:total>0?Math.round(disponiveis/total*100):null,
-            auditoria:{dataConclusao:auditoria.data_conclusao,relatorioNumero:auditoria.relatorio_numero,nota:auditoria.nota}};
-        }
-        const disponiveisSet=porFilial.get(f.id)||new Set();
-        const disponiveis=(checklist||[]).filter(c=>c.catalogo_id&&disponiveisSet.has(c.catalogo_id)).length;
-        return{filialId:f.id,filialNome:f.nome,total:totalChecklist,disponiveis,
-          pct:totalChecklist>0?Math.round(disponiveis/totalChecklist*100):null,auditoria:null};
+        const disponiveis=auditoria
+          ? TOTAL_OBRIGATORIAS_ESPECIFER-auditoria.inconformidades
+          : (checklist||[]).filter(c=>c.catalogo_id&&(porFilial.get(f.id)||new Set()).has(c.catalogo_id)).length;
+        return{filialId:f.id,filialNome:f.nome,total:TOTAL_OBRIGATORIAS_ESPECIFER,disponiveis,
+          pct:Math.round(disponiveis/TOTAL_OBRIGATORIAS_ESPECIFER*100)};
       });
 
       if(!cancelled){
@@ -1321,10 +1324,10 @@ function DashboardView({profile,filiais}){
         <div style={{background:"#fff",border:"1px solid #F1F5F9",borderRadius:14,padding:"18px 20px",marginBottom:14}}>
           <h2 style={{fontSize:15,fontWeight:800,color:"#111827",margin:"0 0 3px"}}>Atingimento de Ferramentas Obrigatórias</h2>
           <p style={{fontSize:11.5,color:"#9CA3AF",margin:"0 0 14px"}}>
-            Quantas ferramentas obrigatórias do checklist oficial Especifer/Iveco a filial tem. Pra
-            filial com auditoria oficial feita, vale o resultado fechado daquele relatório (estar no
-            checklist já conta, mesmo que a alocação física ainda não esteja mapeada no sistema);
-            sem auditoria, o número é o estoque disponível agora.
+            Contra os {TOTAL_OBRIGATORIAS_ESPECIFER} itens do checklist oficial Especifer/Iveco (igual
+            pra todas as filiais). Pra filial com auditoria oficial feita, vale o resultado fechado
+            daquele relatório; sem auditoria, o número é o estoque disponível agora. Histórico
+            completo por filial na tela "Checklist Especifer".
           </p>
           <div style={{display:"flex",flexDirection:"column",gap:12}}>
             {atingimento.map(a=>{
@@ -1338,11 +1341,6 @@ function DashboardView({profile,filiais}){
                   <div style={{minWidth:130,textAlign:"right",fontSize:12.5,fontWeight:700,color:cor,flexShrink:0}}>
                     {a.disponiveis}/{a.total} · {a.pct}%
                   </div>
-                  {a.auditoria&&(
-                    <div style={{width:"100%",fontSize:11,color:"#9CA3AF",paddingLeft:142}}>
-                      Auditoria de {fmtDate(a.auditoria.dataConclusao)}{a.auditoria.relatorioNumero?` · relatório #${a.auditoria.relatorioNumero}`:""}{a.auditoria.nota!=null?` · nota ${a.auditoria.nota}`:""}
-                    </div>
-                  )}
                 </div>
               );
             })}
@@ -1369,6 +1367,126 @@ function DashboardView({profile,filiais}){
         </div>
       )}
       {profile.userType!=="colaborador"&&<UsoAoVivoPanel/>}
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════
+   CHECKLIST ESPECIFER — histórico de auditorias oficiais por filial
+   ══════════════════════════════════════════════════════════════ */
+// Lista as filiais (com um resumo da auditoria mais recente de cada uma); clicar numa filial
+// abre o histórico completo — todas as auditorias já registradas, mais antiga a mais nova.
+function ChecklistEspeciferView({profile,filiais}){
+  const isMobile=useIsMobile();
+  const filiaisView=profile.userType==="admin_geral"?filiais:profile.filiaisAcesso;
+  const[resumoPorFilial,setResumoPorFilial]=useState(new Map());
+  const[loadingResumo,setLoadingResumo]=useState(true);
+  const[filialSelecionada,setFilialSelecionada]=useState(null);
+  const[historico,setHistorico]=useState([]);
+  const[loadingHistorico,setLoadingHistorico]=useState(false);
+
+  useEffect(()=>{
+    let cancelled=false;
+    supabase.from("checklist_especifer_auditorias").select("filial_id,inconformidades,data_conclusao")
+      .in("filial_id",filiaisView.map(f=>f.id)).order("data_conclusao",{ascending:false})
+      .then(({data})=>{
+        if(cancelled)return;
+        const mapa=new Map();
+        (data||[]).forEach(a=>{if(!mapa.has(a.filial_id))mapa.set(a.filial_id,a);});
+        setResumoPorFilial(mapa);
+        setLoadingResumo(false);
+      });
+    return()=>{cancelled=true;};
+  },[filiaisView.map(f=>f.id).join(",")]);
+
+  useEffect(()=>{
+    if(!filialSelecionada)return;
+    let cancelled=false;
+    setLoadingHistorico(true);
+    supabase.from("checklist_especifer_auditorias").select("*")
+      .eq("filial_id",filialSelecionada.id).order("data_conclusao",{ascending:false})
+      .then(({data})=>{if(!cancelled){setHistorico(data||[]);setLoadingHistorico(false);}});
+    return()=>{cancelled=true;};
+  },[filialSelecionada]);
+
+  if(filialSelecionada){
+    return(
+      <div className="fade" style={{padding:isMobile?"20px 16px":"28px 32px"}}>
+        <button onClick={()=>setFilialSelecionada(null)} style={{display:"flex",alignItems:"center",gap:6,
+          border:"none",background:"none",color:"#6B7280",fontSize:13,fontWeight:700,cursor:"pointer",padding:0,marginBottom:14}}>
+          <ArrowLeft size={15}/>Filiais
+        </button>
+        <h1 style={{fontSize:22,fontWeight:800,color:"#111827",margin:"0 0 4px"}}>{filialSelecionada.nome}</h1>
+        <p style={{fontSize:13,color:"#6B7280",margin:"0 0 24px"}}>
+          Histórico de auditorias do checklist oficial Especifer/Iveco — {TOTAL_OBRIGATORIAS_ESPECIFER} itens obrigatórios em cada relatório.
+        </p>
+        {loadingHistorico?<div style={{padding:60,textAlign:"center"}}><Spinner size={20}/></div>:
+        historico.length===0?<EmptyState icon={ClipboardList} title="Nenhuma auditoria registrada" text="Assim que um relatório Especifer dessa filial for cadastrado, o histórico aparece aqui."/>:
+        (
+          <div style={{background:"#fff",border:"1px solid #F1F5F9",borderRadius:16,overflow:"hidden"}}>
+            <table style={{width:"100%",borderCollapse:"collapse"}}>
+              <thead>
+                <tr style={{background:"#F9FAFB"}}>
+                  {["Data","Relatório Especifer","Conformidade","Inconformidades","Nota"].map(h=>(
+                    <th key={h} style={{padding:"10px 16px",textAlign:"left",fontSize:11,fontWeight:700,color:"#6B7280",textTransform:"uppercase"}}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {historico.map(a=>{
+                  const confirmadas=TOTAL_OBRIGATORIAS_ESPECIFER-a.inconformidades;
+                  const pct=Math.round(confirmadas/TOTAL_OBRIGATORIAS_ESPECIFER*100);
+                  const cor=pct>=90?"#059669":pct>=70?"#D97706":"#B91C1C";
+                  return(
+                    <tr key={a.id} style={{borderTop:"1px solid #F1F5F9"}}>
+                      <td style={{padding:"12px 16px",fontSize:13,fontWeight:700,color:"#111827"}}>{fmtDate(a.data_conclusao)}</td>
+                      <td style={{padding:"12px 16px",fontSize:13,color:"#374151"}}>{a.relatorio_numero?`#${a.relatorio_numero}`:"—"}</td>
+                      <td style={{padding:"12px 16px",fontSize:13,fontWeight:700,color:cor}}>{confirmadas}/{TOTAL_OBRIGATORIAS_ESPECIFER} · {pct}%</td>
+                      <td style={{padding:"12px 16px",fontSize:13,color:"#374151"}}>{a.inconformidades}</td>
+                      <td style={{padding:"12px 16px",fontSize:13,color:"#374151"}}>{a.nota??"—"}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return(
+    <div className="fade" style={{padding:isMobile?"20px 16px":"28px 32px"}}>
+      <h1 style={{fontSize:22,fontWeight:800,color:"#111827",margin:"0 0 4px"}}>Checklist Especifer</h1>
+      <p style={{fontSize:13,color:"#6B7280",margin:"0 0 24px"}}>
+        Selecione uma filial pra ver o histórico completo de auditorias do checklist oficial Iveco/Especifer.
+      </p>
+      {loadingResumo?<div style={{padding:60,textAlign:"center"}}><Spinner size={20}/></div>:(
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          {filiaisView.map(f=>{
+            const a=resumoPorFilial.get(f.id);
+            const confirmadas=a?TOTAL_OBRIGATORIAS_ESPECIFER-a.inconformidades:null;
+            const pct=confirmadas!=null?Math.round(confirmadas/TOTAL_OBRIGATORIAS_ESPECIFER*100):null;
+            const cor=pct===null?"#9CA3AF":pct>=90?"#059669":pct>=70?"#D97706":"#B91C1C";
+            return(
+              <button key={f.id} onClick={()=>setFilialSelecionada(f)} className="lift"
+                style={{textAlign:"left",display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap",
+                  background:"#fff",border:"1px solid #F1F5F9",borderRadius:14,padding:16,cursor:"pointer"}}>
+                <div>
+                  <div style={{fontSize:14,fontWeight:700,color:"#111827"}}>{f.nome}</div>
+                  <div style={{fontSize:12,color:"#9CA3AF",marginTop:2}}>
+                    {a?`Última auditoria: ${fmtDate(a.data_conclusao)}`:"Nenhuma auditoria registrada"}
+                  </div>
+                </div>
+                <div style={{display:"flex",alignItems:"center",gap:10}}>
+                  {pct!==null&&<span style={{fontSize:12.5,fontWeight:800,color:cor}}>{confirmadas}/{TOTAL_OBRIGATORIAS_ESPECIFER} · {pct}%</span>}
+                  <ChevronRight size={16} color="#9CA3AF"/>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -5129,6 +5247,7 @@ function App(){
     case "dashboard": content=<DashboardView {...commonProps}/>; break;
     case "ferramentas": content=<FerramentasView {...commonProps} reloadCatalogos={loadCatalogos}/>; break;
     case "movimentacoes": content=<MovimentacoesView {...commonProps}/>; break;
+    case "checklist_especifer": content=<ChecklistEspeciferView {...commonProps}/>; break;
     case "relatorios": content=<RelatoriosView {...commonProps}/>; break;
     case "configuracoes": content=<ConfiguracoesView {...commonProps} reloadFiliais={loadFiliais} reloadCategorias={loadCategorias}
       activeSection={configSection} setActiveSection={setConfigSection} onAvatarChanged={handleAvatarChanged}/>; break;
