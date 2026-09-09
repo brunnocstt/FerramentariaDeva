@@ -1384,6 +1384,8 @@ function ChecklistEspeciferView({profile,filiais}){
   const[filialSelecionada,setFilialSelecionada]=useState(null);
   const[historico,setHistorico]=useState([]);
   const[loadingHistorico,setLoadingHistorico]=useState(false);
+  const[naoEncontradasPorAuditoria,setNaoEncontradasPorAuditoria]=useState(new Map());
+  const[expandidos,setExpandidos]=useState(new Set());
 
   useEffect(()=>{
     let cancelled=false;
@@ -1403,11 +1405,37 @@ function ChecklistEspeciferView({profile,filiais}){
     if(!filialSelecionada)return;
     let cancelled=false;
     setLoadingHistorico(true);
+    setExpandidos(new Set());
     supabase.from("checklist_especifer_auditorias").select("*")
       .eq("filial_id",filialSelecionada.id).order("data_conclusao",{ascending:false})
-      .then(({data})=>{if(!cancelled){setHistorico(data||[]);setLoadingHistorico(false);}});
+      .then(async({data})=>{
+        if(cancelled)return;
+        const auditorias=data||[];
+        setHistorico(auditorias);
+        if(auditorias.length===0){setLoadingHistorico(false);return;}
+        // Carrega junto o detalhe das ferramentas não encontradas de cada auditoria, pra abrir o
+        // dropdown na hora sem precisar de mais uma viagem ao banco por relatório.
+        const{data:itens}=await supabase.from("checklist_especifer_auditoria_itens").select("*")
+          .in("auditoria_id",auditorias.map(a=>a.id));
+        if(cancelled)return;
+        const mapa=new Map();
+        (itens||[]).forEach(it=>{
+          if(!mapa.has(it.auditoria_id))mapa.set(it.auditoria_id,[]);
+          mapa.get(it.auditoria_id).push(it);
+        });
+        setNaoEncontradasPorAuditoria(mapa);
+        setLoadingHistorico(false);
+      });
     return()=>{cancelled=true;};
   },[filialSelecionada]);
+
+  function toggleExpandido(id){
+    setExpandidos(prev=>{
+      const novo=new Set(prev);
+      novo.has(id)?novo.delete(id):novo.add(id);
+      return novo;
+    });
+  }
 
   if(filialSelecionada){
     return(
@@ -1423,32 +1451,50 @@ function ChecklistEspeciferView({profile,filiais}){
         {loadingHistorico?<div style={{padding:60,textAlign:"center"}}><Spinner size={20}/></div>:
         historico.length===0?<EmptyState icon={ClipboardList} title="Nenhuma auditoria registrada" text="Assim que um relatório Especifer dessa filial for cadastrado, o histórico aparece aqui."/>:
         (
-          <div style={{background:"#fff",border:"1px solid #F1F5F9",borderRadius:16,overflow:"hidden"}}>
-            <table style={{width:"100%",borderCollapse:"collapse"}}>
-              <thead>
-                <tr style={{background:"#F9FAFB"}}>
-                  {["Data","Relatório Especifer","Conformidade","Inconformidades","Nota"].map(h=>(
-                    <th key={h} style={{padding:"10px 16px",textAlign:"left",fontSize:11,fontWeight:700,color:"#6B7280",textTransform:"uppercase"}}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {historico.map(a=>{
-                  const confirmadas=TOTAL_OBRIGATORIAS_ESPECIFER-a.inconformidades;
-                  const pct=Math.round(confirmadas/TOTAL_OBRIGATORIAS_ESPECIFER*100);
-                  const cor=pct>=90?"#059669":pct>=70?"#D97706":"#B91C1C";
-                  return(
-                    <tr key={a.id} style={{borderTop:"1px solid #F1F5F9"}}>
-                      <td style={{padding:"12px 16px",fontSize:13,fontWeight:700,color:"#111827"}}>{fmtDate(a.data_conclusao)}</td>
-                      <td style={{padding:"12px 16px",fontSize:13,color:"#374151"}}>{a.relatorio_numero?`#${a.relatorio_numero}`:"—"}</td>
-                      <td style={{padding:"12px 16px",fontSize:13,fontWeight:700,color:cor}}>{confirmadas}/{TOTAL_OBRIGATORIAS_ESPECIFER} · {pct}%</td>
-                      <td style={{padding:"12px 16px",fontSize:13,color:"#374151"}}>{a.inconformidades}</td>
-                      <td style={{padding:"12px 16px",fontSize:13,color:"#374151"}}>{a.nota??"—"}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+          <div style={{display:"flex",flexDirection:"column",gap:10}}>
+            {historico.map(a=>{
+              const confirmadas=TOTAL_OBRIGATORIAS_ESPECIFER-a.inconformidades;
+              const pct=Math.round(confirmadas/TOTAL_OBRIGATORIAS_ESPECIFER*100);
+              const cor=pct>=90?"#059669":pct>=70?"#D97706":"#B91C1C";
+              const aberto=expandidos.has(a.id);
+              const naoEncontradas=naoEncontradasPorAuditoria.get(a.id)||[];
+              return(
+                <div key={a.id} style={{background:"#fff",border:"1px solid #F1F5F9",borderRadius:14,overflow:"hidden"}}>
+                  <button onClick={()=>toggleExpandido(a.id)} className="row-hover"
+                    style={{width:"100%",textAlign:"left",border:"none",background:"transparent",cursor:"pointer",
+                      display:"flex",alignItems:"center",gap:12,flexWrap:"wrap",padding:"14px 16px"}}>
+                    <ChevronRight size={16} color="#9CA3AF" style={{flexShrink:0,transform:aberto?"rotate(90deg)":"none",transition:"transform .15s"}}/>
+                    <div style={{minWidth:100,fontSize:13,fontWeight:700,color:"#111827"}}>{fmtDate(a.data_conclusao)}</div>
+                    <div style={{flex:1,minWidth:120,fontSize:13,color:"#6B7280"}}>{a.relatorio_numero?`Relatório #${a.relatorio_numero}`:"—"}</div>
+                    <div style={{fontSize:12.5,fontWeight:700,color:cor}}>{confirmadas}/{TOTAL_OBRIGATORIAS_ESPECIFER} · {pct}%</div>
+                    {a.nota!=null&&<div style={{fontSize:12,color:"#9CA3AF"}}>nota {a.nota}</div>}
+                  </button>
+                  {aberto&&(
+                    <div style={{padding:"0 16px 16px 42px",borderTop:"1px solid #F8FAFC"}}>
+                      {a.inconformidades===0?(
+                        <p style={{fontSize:12.5,color:"#059669",fontWeight:700,margin:"12px 0 0"}}>Nenhuma ferramenta não encontrada nessa auditoria.</p>
+                      ):naoEncontradas.length===0?(
+                        <p style={{fontSize:12.5,color:"#9CA3AF",margin:"12px 0 0"}}>
+                          {a.inconformidades} ferramenta(s) não encontrada(s), mas o detalhe não foi registrado pra esse relatório.
+                        </p>
+                      ):(
+                        <div style={{display:"flex",flexDirection:"column",gap:0,marginTop:8}}>
+                          <div style={{fontSize:11,fontWeight:700,color:"#9CA3AF",textTransform:"uppercase",margin:"4px 0 6px"}}>
+                            Não encontradas ({naoEncontradas.length})
+                          </div>
+                          {naoEncontradas.map(it=>(
+                            <div key={it.id} style={{display:"flex",gap:10,alignItems:"baseline",padding:"6px 0",borderTop:"1px solid #F8FAFC"}}>
+                              <span style={{fontSize:11,fontWeight:700,color:"#B91C1C",minWidth:90,flexShrink:0}}>{it.codigo}</span>
+                              <span style={{fontSize:12.5,color:"#374151"}}>{it.descricao}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
