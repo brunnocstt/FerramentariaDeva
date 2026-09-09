@@ -2663,6 +2663,17 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
     return Array.from(porCatalogo.values()).sort((a,b)=>a.nome.localeCompare(b.nome));
   },[unidadesFiltradas]);
 
+  // Lista única, em ordem alfabética por nome, misturando estoque por quantidade (sem código) e
+  // unidades individuais (com código) — antes eram duas listas separadas, cada uma reiniciando o
+  // alfabeto, o que dava a impressão de "resetar pra A" no meio da tela.
+  const linhasOrdenadas=useMemo(()=>{
+    const linhas=[
+      ...estoquesFiltrados.map(e=>({tipo:"pool",nome:e.catalogo?.nome||"",dado:e})),
+      ...gruposUnidades.map(g=>({tipo:"unidade",nome:g.nome||"",dado:g})),
+    ];
+    return linhas.sort((a,b)=>a.nome.localeCompare(b.nome,"pt-BR",{sensitivity:"base"}));
+  },[estoquesFiltrados,gruposUnidades]);
+
   const pessoasFilial=useMemo(()=>{
     const fid=(selecionada||grupoSelecionado?.itens?.[0])?.filial_id;
     return pessoas.filter(p=>p.filial_id===fid);
@@ -2784,23 +2795,23 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
       totalItens===0&&totalPendentes===0?<EmptyState icon={Wrench} title="Nenhuma ferramenta encontrada" text="Ajuste os filtros ou cadastre uma nova ferramenta."/>:
       isMobile?(
         <div style={{display:"flex",flexDirection:"column",gap:10}}>
-          {estoquesFiltrados.map(e=>(
-            <button key={"pool-"+e.id} onClick={()=>setEstoqueSelecionado(e)} className="lift"
+          {linhasOrdenadas.map(({tipo,dado})=>tipo==="pool"?(
+            <button key={"pool-"+dado.id} onClick={()=>setEstoqueSelecionado(dado)} className="lift"
               style={{textAlign:"left",background:"#fff",border:"1px solid #F1F5F9",borderRadius:14,padding:14,cursor:"pointer"}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
                 <div>
                   <div style={{fontSize:11,color:"#9CA3AF",fontWeight:700}}>ESTOQUE</div>
                   <div style={{fontSize:14,fontWeight:700,color:"#111827",display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
-                    {e.catalogo?.nome}{e.catalogo?.obrigatoria&&<BadgeObrigatoria/>}
+                    {dado.catalogo?.nome}{dado.catalogo?.obrigatoria&&<BadgeObrigatoria/>}
                   </div>
                 </div>
-                <span style={{fontSize:12,fontWeight:800,color:e.quantidade_disponivel>0?"#059669":"#B91C1C",flexShrink:0}}>
-                  {e.quantidade_disponivel}/{e.quantidade_total} disponíveis
+                <span style={{fontSize:12,fontWeight:800,color:dado.quantidade_disponivel>0?"#059669":"#B91C1C",flexShrink:0}}>
+                  {dado.quantidade_disponivel}/{dado.quantidade_total} disponíveis
                 </span>
               </div>
             </button>
-          ))}
-          {gruposUnidades.map(g=>{
+          ):(()=>{
+            const g=dado;
             const disponiveis=g.itens.filter(u=>u.status==="disponivel").length;
             const unico=g.itens.length===1?g.itens[0]:null;
             return(
@@ -2824,7 +2835,7 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
                 )}
               </button>
             );
-          })}
+          })())}
         </div>
       ):(
         <div style={{background:"#fff",border:"1px solid #F1F5F9",borderRadius:16,overflow:"hidden"}}>
@@ -2837,24 +2848,24 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
               </tr>
             </thead>
             <tbody>
-              {estoquesFiltrados.map(e=>(
-                <tr key={"pool-"+e.id} className="row-hover" onClick={()=>setEstoqueSelecionado(e)}
+              {linhasOrdenadas.map(({tipo,dado})=>tipo==="pool"?(
+                <tr key={"pool-"+dado.id} className="row-hover" onClick={()=>setEstoqueSelecionado(dado)}
                   style={{borderTop:"1px solid #F1F5F9",cursor:"pointer"}}>
                   <td style={{padding:"12px 16px",fontSize:13,fontWeight:700,color:"#9CA3AF"}}>—</td>
-                  <td style={{padding:"12px 16px",fontSize:13,color:"#374151"}}>{e.catalogo?.nome}</td>
-                  <td style={{padding:"12px 16px",fontSize:13,color:"#6B7280"}}>{categorias.find(c=>c.id===e.catalogo?.categoria_id)?.nome||"—"}</td>
-                  <td style={{padding:"12px 16px"}}>{e.catalogo?.obrigatoria?<BadgeObrigatoria/>:<BadgeNaoObrigatoria/>}</td>
+                  <td style={{padding:"12px 16px",fontSize:13,color:"#374151"}}>{dado.catalogo?.nome}</td>
+                  <td style={{padding:"12px 16px",fontSize:13,color:"#6B7280"}}>{categorias.find(c=>c.id===dado.catalogo?.categoria_id)?.nome||"—"}</td>
+                  <td style={{padding:"12px 16px"}}>{dado.catalogo?.obrigatoria?<BadgeObrigatoria/>:<BadgeNaoObrigatoria/>}</td>
                   <td style={{padding:"12px 16px"}}>
-                    <span style={{fontSize:12,fontWeight:800,color:e.quantidade_disponivel>0?"#059669":"#B91C1C"}}>
-                      {e.quantidade_disponivel}/{e.quantidade_total} disponíveis
+                    <span style={{fontSize:12,fontWeight:800,color:dado.quantidade_disponivel>0?"#059669":"#B91C1C"}}>
+                      {dado.quantidade_disponivel}/{dado.quantidade_total} disponíveis
                     </span>
                   </td>
-                  <td style={{padding:"12px 16px",fontSize:13,color:"#374151"}}>{e.quantidade_emprestada>0?`${e.quantidade_emprestada} emprestada(s)`:"—"}</td>
+                  <td style={{padding:"12px 16px",fontSize:13,color:"#374151"}}>{dado.quantidade_emprestada>0?`${dado.quantidade_emprestada} emprestada(s)`:"—"}</td>
                   <td style={{padding:"12px 16px",fontSize:13,color:"#374151"}}>—</td>
                   <td style={{padding:"12px 16px"}}><ChevronRight size={15} color="#9CA3AF"/></td>
                 </tr>
-              ))}
-              {gruposUnidades.map(g=>{
+              ):(()=>{
+                const g=dado;
                 const disponiveis=g.itens.filter(u=>u.status==="disponivel").length;
                 const unico=g.itens.length===1?g.itens[0]:null;
                 return(
@@ -2876,7 +2887,7 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
                     <td style={{padding:"12px 16px"}}><ChevronRight size={15} color="#9CA3AF"/></td>
                   </tr>
                 );
-              })}
+              })())}
             </tbody>
           </table>
         </div>
