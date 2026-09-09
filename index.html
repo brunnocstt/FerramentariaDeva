@@ -112,7 +112,7 @@ import{
   Clock,CheckCircle2,Pencil,Trash2,Menu,Filter,Wrench,PackageCheck,
   ClipboardList,ArrowLeftRight,Hash,MapPin,AlertTriangle,LayoutDashboard,
   FileText,UserCheck,PackagePlus,PackageX,Ban,History,Tag,ScanLine,FileSpreadsheet,
-  Shield,ToggleRight,ToggleLeft,Power,Copy
+  Shield,ToggleRight,ToggleLeft,Power,Copy,Upload
 }from "https://esm.sh/lucide-react?deps=react@18";
 
 /* ── SUPABASE ────────────────────────────────────── */
@@ -1376,8 +1376,10 @@ function DashboardView({profile,filiais}){
    ══════════════════════════════════════════════════════════════ */
 // Lista as filiais (com um resumo da auditoria mais recente de cada uma); clicar numa filial
 // abre o histórico completo — todas as auditorias já registradas, mais antiga a mais nova.
+const CHECKLIST_PDF_BUCKET="checklist-especifer-pdfs";
 function ChecklistEspeciferView({profile,filiais}){
   const isMobile=useIsMobile();
+  const isAdmin=profile.userType==="admin_geral"||profile.userType==="admin_area";
   const filiaisView=profile.userType==="admin_geral"?filiais:profile.filiaisAcesso;
   const[resumoPorFilial,setResumoPorFilial]=useState(new Map());
   const[loadingResumo,setLoadingResumo]=useState(true);
@@ -1386,6 +1388,8 @@ function ChecklistEspeciferView({profile,filiais}){
   const[loadingHistorico,setLoadingHistorico]=useState(false);
   const[naoEncontradasPorAuditoria,setNaoEncontradasPorAuditoria]=useState(new Map());
   const[expandidos,setExpandidos]=useState(new Set());
+  const[enviandoPdf,setEnviandoPdf]=useState(null); // id da auditoria com upload em andamento
+  const[erroPdf,setErroPdf]=useState("");
 
   useEffect(()=>{
     let cancelled=false;
@@ -1437,6 +1441,30 @@ function ChecklistEspeciferView({profile,filiais}){
     });
   }
 
+  async function enviarPdf(auditoria,file){
+    if(!file)return;
+    if(file.type!=="application/pdf"){setErroPdf("Só é possível enviar arquivo PDF.");return;}
+    if(file.size>30*1024*1024){setErroPdf("Arquivo maior que 30MB — confira se é o relatório certo.");return;}
+    setErroPdf("");
+    setEnviandoPdf(auditoria.id);
+    const path=`${auditoria.filial_id}/${auditoria.id}.pdf`;
+    const{error:errUp}=await supabase.storage.from(CHECKLIST_PDF_BUCKET)
+      .upload(path,file,{upsert:true,contentType:"application/pdf"});
+    if(errUp){setEnviandoPdf(null);setErroPdf(errUp.message||"Não foi possível enviar o PDF.");return;}
+    const{error:errUpd}=await supabase.from("checklist_especifer_auditorias").update({pdf_path:path}).eq("id",auditoria.id);
+    setEnviandoPdf(null);
+    if(errUpd){setErroPdf(errUpd.message||"PDF enviado, mas não consegui salvar a referência. Tente de novo.");return;}
+    setHistorico(prev=>prev.map(a=>a.id===auditoria.id?{...a,pdf_path:path}:a));
+  }
+
+  async function baixarPdf(auditoria){
+    if(!auditoria.pdf_path)return;
+    setErroPdf("");
+    const{data,error}=await supabase.storage.from(CHECKLIST_PDF_BUCKET).createSignedUrl(auditoria.pdf_path,60);
+    if(error||!data){setErroPdf("Não foi possível gerar o link de download.");return;}
+    window.open(data.signedUrl,"_blank");
+  }
+
   if(filialSelecionada){
     return(
       <div className="fade" style={{padding:isMobile?"20px 16px":"28px 32px"}}>
@@ -1448,6 +1476,7 @@ function ChecklistEspeciferView({profile,filiais}){
         <p style={{fontSize:13,color:"#6B7280",margin:"0 0 24px"}}>
           Histórico de auditorias do checklist oficial Especifer/Iveco — {TOTAL_OBRIGATORIAS_ESPECIFER} itens obrigatórios em cada relatório.
         </p>
+        <ErrorBox>{erroPdf}</ErrorBox>
         {loadingHistorico?<div style={{padding:60,textAlign:"center"}}><Spinner size={20}/></div>:
         historico.length===0?<EmptyState icon={ClipboardList} title="Nenhuma auditoria registrada" text="Assim que um relatório Especifer dessa filial for cadastrado, o histórico aparece aqui."/>:
         (
@@ -1471,6 +1500,24 @@ function ChecklistEspeciferView({profile,filiais}){
                   </button>
                   {aberto&&(
                     <div style={{padding:"0 16px 16px 42px",borderTop:"1px solid #F8FAFC"}}>
+                      <div style={{marginTop:12}}>
+                        {a.pdf_path?(
+                          <BtnSecondary onClick={()=>baixarPdf(a)}><Download size={14}/>Baixar PDF do relatório</BtnSecondary>
+                        ):isAdmin?(
+                          <>
+                            <input type="file" id={"pdf-upload-"+a.id} accept="application/pdf" style={{display:"none"}}
+                              onChange={e=>enviarPdf(a,e.target.files?.[0])} disabled={enviandoPdf===a.id}/>
+                            <label htmlFor={"pdf-upload-"+a.id} style={{display:"inline-flex",alignItems:"center",gap:8,
+                              padding:"9px 14px",borderRadius:10,border:"1px solid #E5E7EB",background:"#fff",
+                              fontSize:13,fontWeight:700,color:"#374151",cursor:enviandoPdf===a.id?"default":"pointer"}}>
+                              {enviandoPdf===a.id?<span className="spin" style={{display:"flex"}}><RefreshCw size={14}/></span>:<Upload size={14}/>}
+                              {enviandoPdf===a.id?"Enviando...":"Enviar PDF do relatório"}
+                            </label>
+                          </>
+                        ):(
+                          <p style={{fontSize:12,color:"#9CA3AF",margin:0}}>PDF do relatório ainda não foi anexado.</p>
+                        )}
+                      </div>
                       {a.inconformidades===0?(
                         <p style={{fontSize:12.5,color:"#059669",fontWeight:700,margin:"12px 0 0"}}>Nenhuma ferramenta não encontrada nessa auditoria.</p>
                       ):naoEncontradas.length===0?(
