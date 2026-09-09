@@ -271,6 +271,17 @@ function BadgeNaoObrigatoria(){
     </span>
   );
 }
+// Ferramenta confirmada como existente pelo checklist oficial (obrigatória), mas ainda sem
+// nenhuma ferramentas_unidade/estoque_pool cadastrado — não sabemos onde ela está fisicamente.
+function BadgePendenteAlocacao(){
+  return(
+    <span style={{display:"inline-flex",alignItems:"center",gap:4,padding:"3px 8px",borderRadius:99,
+      background:"#FEE2E2",color:"#B91C1C",fontSize:10.5,fontWeight:800,whiteSpace:"nowrap",
+      textTransform:"uppercase",letterSpacing:".3px"}}>
+      <Clock size={11}/>Pendente de alocação
+    </span>
+  );
+}
 
 /* ── LOGO ────────────────────────────────────────── */
 function Logo({color="white",height=20}){
@@ -1341,10 +1352,10 @@ function DashboardView({profile,filiais}){
 // 1) escolher um TIPO já existente no catálogo, ou (só admin_geral) cadastrar um tipo novo;
 // 2) conforme a categoria do tipo escolhido, pedir OU um código de unidade individual
 //    (ferramentas_unidade) OU uma quantidade a somar ao estoque da filial (estoque_pool).
-function ModalNovaFerramenta({onClose,onSaved,filiais,categorias,catalogos,profile,editandoUnidade}){
+function ModalNovaFerramenta({onClose,onSaved,filiais,categorias,catalogos,profile,editandoUnidade,catalogoPreSelecionado}){
   const isAdminGeral=profile.userType==="admin_geral";
   const[modoNovoTipo,setModoNovoTipo]=useState(false);
-  const[catalogoId,setCatalogoId]=useState(editandoUnidade?.catalogo_id||"");
+  const[catalogoId,setCatalogoId]=useState(editandoUnidade?.catalogo_id||catalogoPreSelecionado?.id||"");
   const[novoTipoNome,setNovoTipoNome]=useState("");
   const[novoTipoCategoriaId,setNovoTipoCategoriaId]=useState("");
   const[novoTipoObrigatoria,setNovoTipoObrigatoria]=useState(false);
@@ -1424,6 +1435,11 @@ function ModalNovaFerramenta({onClose,onSaved,filiais,categorias,catalogos,profi
       setLoading(false);
       if(err){setError(traduzErro(err));return;}
     }
+    // Primeira alocação física registrada pra essa ferramenta — a partir daqui ela deixa de
+    // ser "pendente de alocação" (a gente já sabe onde pelo menos uma unidade/estoque está).
+    if(catalogoAtual?.pendente_alocacao){
+      await supabase.from("ferramentas_catalogo").update({pendente_alocacao:false}).eq("id",finalCatalogoId);
+    }
     onSaved();
   }
 
@@ -1435,7 +1451,15 @@ function ModalNovaFerramenta({onClose,onSaved,filiais,categorias,catalogos,profi
       </>}>
       <ErrorBox>{error}</ErrorBox>
       <div style={{display:"flex",flexDirection:"column",gap:14}}>
-        {!editandoUnidade&&(modoNovoTipo?(
+        {catalogoPreSelecionado&&!editandoUnidade&&(
+          <div style={{padding:12,borderRadius:10,background:"#FEF2F2",border:"1px solid #FEE2E2"}}>
+            <div style={{fontSize:11,color:"#9CA3AF",fontWeight:700,textTransform:"uppercase",marginBottom:4}}>Cadastrando alocação pra</div>
+            <div style={{fontSize:14,fontWeight:700,color:"#111827",display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+              {catalogoPreSelecionado.nome}<BadgePendenteAlocacao/>
+            </div>
+          </div>
+        )}
+        {!catalogoPreSelecionado&&!editandoUnidade&&(modoNovoTipo?(
           <>
             <Field label="Nome da nova ferramenta" required>
               <input value={novoTipoNome} onChange={e=>setNovoTipoNome(e.target.value)} style={inputStyle} placeholder="Ex.: Torquímetro 1/2&quot;"/>
@@ -2208,7 +2232,8 @@ function TransferenciasPendentesPanel({profile,onChanged}){
 // dentro do medidor invisível (nowrap) e do ModalFiltrosEstoque, sempre com a mesma marcação
 // pra medição de largura ficar fiel ao que de fato é renderizado.
 function FiltrosEstoqueCampos({filtroStatus,setFiltroStatus,filtroFilial,setFiltroFilial,mostrarFilial,filiaisOpcoes,
-  filtroCategoria,setFiltroCategoria,categorias,filtroObrigatoria,setFiltroObrigatoria,selectWidth="auto"}){
+  filtroCategoria,setFiltroCategoria,categorias,filtroObrigatoria,setFiltroObrigatoria,
+  filtroPendenteAlocacao,setFiltroPendenteAlocacao,selectWidth="auto"}){
   return(
     <>
       <Field label="Status">
@@ -2238,11 +2263,18 @@ function FiltrosEstoqueCampos({filtroStatus,setFiltroStatus,filtroFilial,setFilt
           <option value="nao">Só não obrigatórias</option>
         </select>
       </Field>
+      <Field label="Alocação">
+        <select value={filtroPendenteAlocacao} onChange={e=>setFiltroPendenteAlocacao(e.target.value)} style={{...inputStyle,width:selectWidth}}>
+          <option value="">Todas</option>
+          <option value="sim">Só pendentes de alocação</option>
+          <option value="nao">Só já alocadas</option>
+        </select>
+      </Field>
     </>
   );
 }
 function ModalFiltrosEstoque({onClose,onLimpar,...campos}){
-  const temFiltros=!!(campos.filtroStatus||campos.filtroFilial||campos.filtroCategoria||campos.filtroObrigatoria);
+  const temFiltros=!!(campos.filtroStatus||campos.filtroFilial||campos.filtroCategoria||campos.filtroObrigatoria||campos.filtroPendenteAlocacao);
   return(
     <Modal title="Filtros" onClose={onClose} width={380}
       footer={<>
@@ -2266,10 +2298,12 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
   const[filtroFilial,setFiltroFilial]=useState("");
   const[filtroCategoria,setFiltroCategoria]=useState("");
   const[filtroObrigatoria,setFiltroObrigatoria]=useState("");
+  const[filtroPendenteAlocacao,setFiltroPendenteAlocacao]=useState("");
   const[selecionada,setSelecionada]=useState(null);
   const[grupoSelecionado,setGrupoSelecionado]=useState(null);
   const[estoqueSelecionado,setEstoqueSelecionado]=useState(null);
   const[novaAberta,setNovaAberta]=useState(false);
+  const[catalogoParaAlocar,setCatalogoParaAlocar]=useState(null);
   const[retiradaAberta,setRetiradaAberta]=useState(false);
   const[devolucaoAberta,setDevolucaoAberta]=useState(false);
   const[exportarAberto,setExportarAberto]=useState(false);
@@ -2277,12 +2311,12 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
   const isAdmin=profile.userType==="admin_geral"||profile.userType==="admin_area";
   const mostrarFiltroFilial=profile.userType==="admin_geral"||profile.filiaisAcesso.length>1;
   const filiaisOpcoesFiltro=profile.userType==="admin_geral"?filiais:profile.filiaisAcesso;
-  const filtrosAtivos=[filtroStatus,filtroFilial,filtroCategoria,filtroObrigatoria].filter(Boolean).length;
+  const filtrosAtivos=[filtroStatus,filtroFilial,filtroCategoria,filtroObrigatoria,filtroPendenteAlocacao].filter(Boolean).length;
 
   async function load(){
     setLoading(true);
-    let qU=supabase.from("ferramentas_unidade").select("*, colaborador_atual:colaborador_atual_id(name), catalogo:catalogo_id(nome,categoria_id,obrigatoria,requer_licenca)").order("codigo");
-    let qE=supabase.from("estoque_pool").select("*, catalogo:catalogo_id(nome,categoria_id,obrigatoria,requer_licenca)");
+    let qU=supabase.from("ferramentas_unidade").select("*, colaborador_atual:colaborador_atual_id(name), catalogo:catalogo_id(nome,categoria_id,obrigatoria,requer_licenca,pendente_alocacao)").order("codigo");
+    let qE=supabase.from("estoque_pool").select("*, catalogo:catalogo_id(nome,categoria_id,obrigatoria,requer_licenca,pendente_alocacao)");
     if(filtroFilial){qU=qU.eq("filial_id",filtroFilial);qE=qE.eq("filial_id",filtroFilial);}
     else if(profile.userType!=="admin_geral"){qU=qU.in("filial_id",profile.filialIds);qE=qE.in("filial_id",profile.filialIds);}
     if(filtroStatus)qU=qU.eq("status",filtroStatus);
@@ -2303,6 +2337,7 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
   useEffect(()=>{load();},[filtroStatus,filtroFilial,filtroCategoria,profile.filialIds]);
 
   const unidadesFiltradas=useMemo(()=>{
+    if(filtroPendenteAlocacao==="sim")return []; // pendentes de alocação não têm unidade nenhuma — nada a mostrar aqui
     const t=busca.trim().toLowerCase();
     return unidades.filter(f=>{
       if(t&&!(f.codigo.toLowerCase().includes(t)||(f.catalogo?.nome||"").toLowerCase().includes(t)))return false;
@@ -2310,9 +2345,10 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
       if(filtroObrigatoria==="nao"&&f.catalogo?.obrigatoria)return false;
       return true;
     });
-  },[unidades,busca,filtroObrigatoria]);
+  },[unidades,busca,filtroObrigatoria,filtroPendenteAlocacao]);
   const estoquesFiltrados=useMemo(()=>{
     if(filtroStatus)return [];
+    if(filtroPendenteAlocacao==="sim")return [];
     const t=busca.trim().toLowerCase();
     return estoques.filter(e=>{
       if(t&&!(e.catalogo?.nome||"").toLowerCase().includes(t))return false;
@@ -2320,7 +2356,24 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
       if(filtroObrigatoria==="nao"&&e.catalogo?.obrigatoria)return false;
       return true;
     });
-  },[estoques,busca,filtroStatus,filtroObrigatoria]);
+  },[estoques,busca,filtroStatus,filtroObrigatoria,filtroPendenteAlocacao]);
+
+  // Ferramentas confirmadas pelo checklist oficial mas sem nenhuma ferramentas_unidade/estoque_pool
+  // ainda — não aparecem nas listas acima porque não têm nenhuma linha lá. Vêm direto do catálogo
+  // (já carregado no App), então não dependem de filial/status (esses filtros não fazem sentido
+  // pra algo que ainda não tem localização nenhuma).
+  const catalogosPendentes=useMemo(()=>{
+    if(filtroPendenteAlocacao==="nao")return [];
+    if(filtroStatus)return []; // pendente não tem status de unidade
+    if(filtroObrigatoria==="nao")return []; // pendentes são sempre obrigatórias
+    const t=busca.trim().toLowerCase();
+    return catalogos.filter(c=>{
+      if(!c.pendente_alocacao)return false;
+      if(t&&!c.nome.toLowerCase().includes(t))return false;
+      if(filtroCategoria&&c.categoria_id!==filtroCategoria)return false;
+      return true;
+    });
+  },[catalogos,busca,filtroStatus,filtroCategoria,filtroObrigatoria,filtroPendenteAlocacao]);
 
   // Visão de dois níveis: agrupa as unidades individuais por catálogo — a lista mostra
   // um item por tipo de ferramenta (quantas temos daquela), e o clique abre o detalhe
@@ -2346,6 +2399,7 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
   // (uma linha de pool pode representar várias unidades, ex.: "Suporte Câmbio" qtd=4).
   const totalItens=unidadesFiltradas.length+estoquesFiltrados.reduce((s,e)=>s+e.quantidade_total,0);
   const totalLinhas=gruposUnidades.length+estoquesFiltrados.length;
+  const totalPendentes=catalogosPendentes.length;
 
   function abrirGrupo(grupo){
     if(grupo.itens.length===1)setSelecionada(grupo.itens[0]);
@@ -2395,7 +2449,10 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:20,flexWrap:"wrap",gap:12}}>
         <div>
           <h1 style={{fontSize:22,fontWeight:800,color:"#111827",margin:"0 0 4px"}}>Estoque</h1>
-          <p style={{fontSize:13,color:"#6B7280",margin:0}}>{totalLinhas} tipo(s) de ferramenta · {totalItens} unidade(s)</p>
+          <p style={{fontSize:13,color:"#6B7280",margin:0}}>
+            {totalLinhas} tipo(s) de ferramenta · {totalItens} unidade(s)
+            {totalPendentes>0&&<> · <span style={{color:"#B91C1C",fontWeight:700}}>{totalPendentes} pendente(s) de alocação</span></>}
+          </p>
         </div>
         <div style={{display:"flex",alignItems:"center",gap:isMobile?8:14,flexWrap:"wrap"}}>
           <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
@@ -2446,11 +2503,12 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
           filtroFilial={filtroFilial} setFiltroFilial={setFiltroFilial} mostrarFilial={mostrarFiltroFilial}
           filiaisOpcoes={filiaisOpcoesFiltro} filtroCategoria={filtroCategoria} setFiltroCategoria={setFiltroCategoria}
           categorias={categorias} filtroObrigatoria={filtroObrigatoria} setFiltroObrigatoria={setFiltroObrigatoria}
-          onLimpar={()=>{setFiltroStatus("");setFiltroFilial("");setFiltroCategoria("");setFiltroObrigatoria("");}}/>
+          filtroPendenteAlocacao={filtroPendenteAlocacao} setFiltroPendenteAlocacao={setFiltroPendenteAlocacao}
+          onLimpar={()=>{setFiltroStatus("");setFiltroFilial("");setFiltroCategoria("");setFiltroObrigatoria("");setFiltroPendenteAlocacao("");}}/>
       )}
 
       {loading?<div style={{padding:60,textAlign:"center"}}><Spinner size={20}/></div>:
-      totalItens===0?<EmptyState icon={Wrench} title="Nenhuma ferramenta encontrada" text="Ajuste os filtros ou cadastre uma nova ferramenta."/>:
+      totalItens===0&&totalPendentes===0?<EmptyState icon={Wrench} title="Nenhuma ferramenta encontrada" text="Ajuste os filtros ou cadastre uma nova ferramenta."/>:
       isMobile?(
         <div style={{display:"flex",flexDirection:"column",gap:10}}>
           {estoquesFiltrados.map(e=>(
@@ -2551,11 +2609,32 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
         </div>
       )}
 
+      {totalPendentes>0&&(
+        <div style={{marginTop:24}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+            <h2 style={{fontSize:14,fontWeight:800,color:"#111827",margin:0}}>Pendentes de Alocação</h2>
+            <span style={{fontSize:12,color:"#6B7280"}}>ferramentas confirmadas pelo checklist oficial, mas sem localização física mapeada ainda</span>
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:10}}>
+            {catalogosPendentes.map(c=>(
+              <div key={c.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap",
+                background:"#fff",border:"1px solid #FEE2E2",borderRadius:14,padding:14}}>
+                <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                  <span style={{fontSize:14,fontWeight:700,color:"#111827"}}>{c.nome}</span>
+                  <BadgePendenteAlocacao/>
+                </div>
+                {isAdmin&&<BtnSecondary onClick={()=>setCatalogoParaAlocar(c)}><MapPin size={14}/>Cadastrar alocação</BtnSecondary>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {selecionada&&<FerramentaDetalheModal ferramenta={selecionada} profile={profile} filiais={filiais} categorias={categorias} catalogos={catalogos}
         pessoasFilial={pessoasFilial}
         onClose={()=>setSelecionada(null)}
         onChanged={()=>{load();
-          supabase.from("ferramentas_unidade").select("*, colaborador_atual:colaborador_atual_id(name), catalogo:catalogo_id(nome,categoria_id,obrigatoria,requer_licenca)").eq("id",selecionada.id).single()
+          supabase.from("ferramentas_unidade").select("*, colaborador_atual:colaborador_atual_id(name), catalogo:catalogo_id(nome,categoria_id,obrigatoria,requer_licenca,pendente_alocacao)").eq("id",selecionada.id).single()
             .then(({data})=>{if(data)setSelecionada(data);});
         }}/>}
       {estoqueSelecionado&&<ModalEstoqueDetalhe estoque={estoqueSelecionado} profile={profile} filiais={filiais}
@@ -2566,6 +2645,10 @@ function FerramentasView({profile,filiais,categorias,catalogos,pessoas,reloadCat
         onSelectUnidade={u=>{setGrupoSelecionado(null);setSelecionada(u);}}/>}
       {novaAberta&&<ModalNovaFerramenta filiais={filiais} categorias={categorias} catalogos={catalogos} profile={profile}
         onClose={()=>setNovaAberta(false)} onSaved={()=>{setNovaAberta(false);reloadCatalogos&&reloadCatalogos();load();}}/>}
+      {catalogoParaAlocar&&<ModalNovaFerramenta filiais={filiais} categorias={categorias} catalogos={catalogos} profile={profile}
+        catalogoPreSelecionado={catalogoParaAlocar}
+        onClose={()=>setCatalogoParaAlocar(null)}
+        onSaved={()=>{setCatalogoParaAlocar(null);reloadCatalogos&&reloadCatalogos();load();}}/>}
       {retiradaAberta&&<ModalNovaRetirada filiais={filiais} profile={profile}
         onClose={()=>setRetiradaAberta(false)} onFeito={load}/>}
       {devolucaoAberta&&<ModalDevolucao filiais={filiais} profile={profile}
