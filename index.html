@@ -1621,6 +1621,7 @@ function ModalNovaFerramenta({onClose,onSaved,filiais,categorias,catalogos,profi
   const[dataValidadeLicenca,setDataValidadeLicenca]=useState(editandoUnidade?.data_validade_licenca||"");
   const[loading,setLoading]=useState(false);
   const[error,setError]=useState("");
+  const[codigosExistentes,setCodigosExistentes]=useState(null); // null = ainda não checou
 
   const catalogoAtual=editandoUnidade
     ? catalogos.find(c=>c.id===editandoUnidade.catalogo_id)
@@ -1631,6 +1632,25 @@ function ModalNovaFerramenta({onClose,onSaved,filiais,categorias,catalogos,profi
   const requerAfericao=!!categoriaAtual?.requer_afericao;
   const requerLicenca=!!catalogoAtual?.requer_licenca;
   const controleIndividual=categoriaAtual?.controle_individual!==false; // default true se ainda não sabemos
+  // Se a ferramenta selecionada já tem unidades cadastradas e todas usam o mesmo código
+  // (ex.: código do fabricante do checklist Especifer), puxa esse código automaticamente em
+  // vez de deixar digitar de novo — evita erro de digitação criando um código diferente pra
+  // uma unidade que devia ser idêntica às outras.
+  useEffect(()=>{
+    setCodigosExistentes(null); // volta pro estado "verificando" a cada troca de ferramenta
+    if(editandoUnidade||!catalogoId||!controleIndividual)return;
+    let cancelled=false;
+    supabase.from("ferramentas_unidade").select("codigo").eq("catalogo_id",catalogoId)
+      .then(({data})=>{
+        if(cancelled)return;
+        const distintos=[...new Set((data||[]).map(u=>u.codigo))];
+        setCodigosExistentes(distintos);
+        setCodigo(distintos.length===1?distintos[0]:"");
+      });
+    return()=>{cancelled=true;};
+  },[catalogoId,controleIndividual,editandoUnidade]);
+  const verificandoCodigo=!editandoUnidade&&controleIndividual&&!!catalogoId&&codigosExistentes===null;
+  const codigoTravado=!editandoUnidade&&controleIndividual&&codigosExistentes?.length===1;
 
   async function salvar(){
     setError("");
@@ -1767,8 +1787,14 @@ function ModalNovaFerramenta({onClose,onSaved,filiais,categorias,catalogos,profi
 
         {controleIndividual?(
           <>
-            <Field label="Código" required hint="Pode repetir — se a ferramenta não tem número de série (ex.: código do fabricante), várias unidades idênticas podem usar o mesmo código.">
-              <input value={codigo} onChange={e=>setCodigo(e.target.value)} style={inputStyle} placeholder="Ex.: FER-0123"/>
+            <Field label="Código" required
+              hint={verificandoCodigo?"Verificando se essa ferramenta já tem código cadastrado...":
+                codigoTravado?"Preenchido automaticamente — mesmo código das unidades já cadastradas dessa ferramenta.":
+                "Pode repetir — se a ferramenta não tem número de série (ex.: código do fabricante), várias unidades idênticas podem usar o mesmo código."}>
+              <input value={verificandoCodigo?"":codigo} onChange={e=>setCodigo(e.target.value)}
+                readOnly={codigoTravado} disabled={verificandoCodigo}
+                style={{...inputStyle,...((codigoTravado||verificandoCodigo)?{background:"#F9FAFB",color:"#6B7280",cursor:"default"}:{})}}
+                placeholder={verificandoCodigo?"Verificando...":"Ex.: FER-0123"}/>
             </Field>
             {!editandoUnidade&&(
               <Field label="Quantidade" hint="Quantas unidades com esse código cadastrar de uma vez. Deixe em branco pra 1.">
