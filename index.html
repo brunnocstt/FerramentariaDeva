@@ -1600,7 +1600,11 @@ function ChecklistEspeciferView({profile,filiais}){
 // 2) conforme a categoria do tipo escolhido, pedir OU um código de unidade individual
 //    (ferramentas_unidade) OU uma quantidade a somar ao estoque da filial (estoque_pool).
 function ModalNovaFerramenta({onClose,onSaved,filiais,categorias,catalogos,profile,editandoUnidade,catalogoPreSelecionado}){
+  // Cadastrar um TIPO novo no catálogo (compartilhado entre filiais) é liberado pra admin_geral
+  // e admin_area — a constraint de nome único evita duplicidade real. Só editar/apagar um tipo
+  // que já existe continua reservado ao admin_geral (RLS: catalogo_update/catalogo_delete).
   const isAdminGeral=profile.userType==="admin_geral";
+  const podeCriarTipo=isAdminGeral||profile.userType==="admin_area";
   const[modoNovoTipo,setModoNovoTipo]=useState(false);
   const[catalogoId,setCatalogoId]=useState(editandoUnidade?.catalogo_id||catalogoPreSelecionado?.id||"");
   const[novoTipoNome,setNovoTipoNome]=useState("");
@@ -1688,11 +1692,9 @@ function ModalNovaFerramenta({onClose,onSaved,filiais,categorias,catalogos,profi
       setLoading(false);
       if(err){setError(traduzErro(err));return;}
     }
-    // Primeira alocação física registrada pra essa ferramenta — a partir daqui ela deixa de
-    // ser "pendente de alocação" (a gente já sabe onde pelo menos uma unidade/estoque está).
-    if(catalogoAtual?.pendente_alocacao){
-      await supabase.from("ferramentas_catalogo").update({pendente_alocacao:false}).eq("id",finalCatalogoId);
-    }
+    // Zerar pendente_alocacao é feito por trigger no banco (trg_limpar_pendente_alocacao_*),
+    // não aqui — assim funciona pra quem cadastra, seja admin_geral ou admin_area, sem depender
+    // do RLS de ferramentas_catalogo (que só libera UPDATE direto pra admin_geral).
     onSaved();
   }
 
@@ -1731,7 +1733,7 @@ function ModalNovaFerramenta({onClose,onSaved,filiais,categorias,catalogos,profi
               <input type="checkbox" checked={novoTipoObrigatoria} onChange={e=>setNovoTipoObrigatoria(e.target.checked)}/>
               Ferramenta obrigatória (checklist Iveco/Especifer)
             </label>
-            {isAdminGeral&&<button type="button" onClick={()=>setModoNovoTipo(false)}
+            {podeCriarTipo&&<button type="button" onClick={()=>setModoNovoTipo(false)}
               style={{border:"none",background:"none",color:BLUE,fontSize:12,fontWeight:700,cursor:"pointer",padding:0,textAlign:"left"}}>
               ← Usar uma ferramenta já cadastrada
             </button>}
@@ -1748,7 +1750,7 @@ function ModalNovaFerramenta({onClose,onSaved,filiais,categorias,catalogos,profi
               {controleIndividual?"Cada unidade tem seu próprio registro (o código pode repetir).":"Controlado por quantidade (sem código individual)."}
               {requerAfericao&&" Exige controle de aferição."}
             </div>}
-            {isAdminGeral&&<button type="button" onClick={()=>setModoNovoTipo(true)}
+            {podeCriarTipo&&<button type="button" onClick={()=>setModoNovoTipo(true)}
               style={{border:"none",background:"none",color:BLUE,fontSize:12,fontWeight:700,cursor:"pointer",padding:0,textAlign:"left"}}>
               + Cadastrar uma ferramenta nova
             </button>}
