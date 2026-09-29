@@ -1180,11 +1180,142 @@ function UsoAoVivoPanel(){
   );
 }
 
+// Reconciliação entre a lista mestre do checklist oficial Especifer/Iveco e o que cada filial
+// tem de fato cadastrado (preciário). Dois sentidos, lado a lado: itens do checklist sem
+// nenhuma unidade/pool naquela filial (a auditoria pode ter confirmado a ferramenta na vistoria
+// física, mas o sistema não sabe disso até alguém cadastrar), e catálogos com estoque naquela
+// filial que não correspondem a nenhum item do checklist (ferramenta de bancada comum, fora do
+// escopo da auditoria — não é um problema, só contexto). Sem filtro de filial, cada linha mostra
+// de qual filial se trata; um item do checklist nunca vinculado a NENHUM catálogo (em filial
+// nenhuma) aparece uma vez só, marcado "Nenhuma filial", em vez de repetir pra cada uma.
+function ReconciliacaoChecklistPreciarioPanel({profile,filiais}){
+  const isMobile=useIsMobile();
+  const filiaisView=profile.userType==="admin_geral"?filiais:profile.filiaisAcesso;
+  const filiaisKey=filiaisView.map(f=>f.id).join(",");
+  const[filialId,setFilialId]=useState("");
+  const[loading,setLoading]=useState(true);
+  const[semPreciario,setSemPreciario]=useState([]);
+  const[foraChecklist,setForaChecklist]=useState([]);
+
+  useEffect(()=>{
+    let cancelled=false;
+    async function load(){
+      setLoading(true);
+      const filiaisIds=filiaisView.map(f=>f.id);
+      const[{data:checklist},{data:catalogos},{data:unidades},{data:pools}]=await Promise.all([
+        supabase.from("checklist_especifer_itens").select("codigo,descricao,catalogo_id").order("ordem"),
+        supabase.from("ferramentas_catalogo").select("id,nome"),
+        supabase.from("ferramentas_unidade").select("filial_id,catalogo_id").eq("ativo",true).in("filial_id",filiaisIds),
+        supabase.from("estoque_pool").select("filial_id,catalogo_id").in("filial_id",filiaisIds),
+      ]);
+      if(cancelled)return;
+      const nomeCatalogo=new Map((catalogos||[]).map(c=>[c.id,c.nome]));
+      const nomeFilial=new Map(filiaisView.map(f=>[f.id,f.nome]));
+      const stockPorFilial=new Map(); // filial_id -> Set(catalogo_id)
+      [...(unidades||[]),...(pools||[])].forEach(r=>{
+        if(!stockPorFilial.has(r.filial_id))stockPorFilial.set(r.filial_id,new Set());
+        stockPorFilial.get(r.filial_id).add(r.catalogo_id);
+      });
+      const catalogoIdsChecklist=new Set((checklist||[]).filter(c=>c.catalogo_id).map(c=>c.catalogo_id));
+
+      const esquerda=[];
+      (checklist||[]).forEach(c=>{
+        if(!c.catalogo_id){
+          esquerda.push({key:"n-"+c.codigo,codigo:c.codigo,descricao:c.descricao,filialId:null,filialNome:"Nenhuma filial"});
+          return;
+        }
+        filiaisView.forEach(f=>{
+          if(!(stockPorFilial.get(f.id)||new Set()).has(c.catalogo_id)){
+            esquerda.push({key:c.codigo+"-"+f.id,codigo:c.codigo,descricao:c.descricao,filialId:f.id,filialNome:f.nome});
+          }
+        });
+      });
+
+      const direita=[];
+      stockPorFilial.forEach((catalogoIds,fId)=>{
+        catalogoIds.forEach(cid=>{
+          if(!catalogoIdsChecklist.has(cid)){
+            direita.push({key:cid+"-"+fId,catalogoNome:nomeCatalogo.get(cid)||"—",filialId:fId,filialNome:nomeFilial.get(fId)||"—"});
+          }
+        });
+      });
+      direita.sort((a,b)=>a.catalogoNome.localeCompare(b.catalogoNome,"pt-BR",{sensitivity:"base"}));
+
+      if(!cancelled){
+        setSemPreciario(esquerda);
+        setForaChecklist(direita);
+        setLoading(false);
+      }
+    }
+    load();
+    return()=>{cancelled=true;};
+  },[filiaisKey]);
+
+  const semPreciarioFiltrado=useMemo(()=>
+    filialId?semPreciario.filter(i=>i.filialId===filialId||i.filialId===null):semPreciario,
+  [semPreciario,filialId]);
+  const foraChecklistFiltrado=useMemo(()=>
+    filialId?foraChecklist.filter(i=>i.filialId===filialId):foraChecklist,
+  [foraChecklist,filialId]);
+
+  const badgeStyle={fontSize:10.5,fontWeight:700,color:BLUE,background:"#EEF2FF",padding:"1px 8px",
+    borderRadius:999,whiteSpace:"nowrap",flexShrink:0};
+
+  return(
+    <div style={{background:"#fff",border:"1px solid #F1F5F9",borderRadius:14,padding:"18px 20px",marginBottom:14}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:10,marginBottom:3}}>
+        <h2 style={{fontSize:15,fontWeight:800,color:"#111827",margin:0}}>Reconciliação Checklist × Preciário</h2>
+        <select value={filialId} onChange={e=>setFilialId(e.target.value)} style={{...inputStyle,width:isMobile?"100%":220}}>
+          <option value="">Todas as filiais</option>
+          {filiaisView.map(f=><option key={f.id} value={f.id}>{f.nome}</option>)}
+        </select>
+      </div>
+      <p style={{fontSize:11.5,color:"#9CA3AF",margin:"0 0 14px"}}>
+        Compara a lista mestre do checklist oficial Especifer/Iveco com o que cada filial tem cadastrado no preciário.
+      </p>
+      {loading?<div style={{padding:40,textAlign:"center"}}><Spinner size={20}/></div>:(
+        <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:20}}>
+          <div>
+            <div style={{fontSize:11.5,fontWeight:800,color:"#374151",textTransform:"uppercase",letterSpacing:.3,margin:"0 0 8px"}}>
+              Checklist sem preciário ({semPreciarioFiltrado.length})
+            </div>
+            <div style={{maxHeight:420,overflowY:"auto"}}>
+              {semPreciarioFiltrado.length===0?
+                <p style={{fontSize:12,color:"#9CA3AF",margin:"8px 0 0"}}>Nada pendente.</p>:
+                semPreciarioFiltrado.map(it=>(
+                  <div key={it.key} style={{display:"flex",gap:8,alignItems:"baseline",flexWrap:"wrap",padding:"7px 0",borderTop:"1px solid #F8FAFC"}}>
+                    <span style={{fontSize:11,fontWeight:700,color:"#9CA3AF",minWidth:78,flexShrink:0}}>{it.codigo}</span>
+                    <span style={{fontSize:12.5,color:"#374151",flex:1,minWidth:140}}>{it.descricao}</span>
+                    {!filialId&&<span style={badgeStyle}>{it.filialNome}</span>}
+                  </div>
+                ))}
+            </div>
+          </div>
+          <div>
+            <div style={{fontSize:11.5,fontWeight:800,color:"#374151",textTransform:"uppercase",letterSpacing:.3,margin:"0 0 8px"}}>
+              Preciário fora do checklist ({foraChecklistFiltrado.length})
+            </div>
+            <div style={{maxHeight:420,overflowY:"auto"}}>
+              {foraChecklistFiltrado.length===0?
+                <p style={{fontSize:12,color:"#9CA3AF",margin:"8px 0 0"}}>Nada fora do checklist.</p>:
+                foraChecklistFiltrado.map(it=>(
+                  <div key={it.key} style={{display:"flex",gap:8,alignItems:"baseline",justifyContent:"space-between",flexWrap:"wrap",padding:"7px 0",borderTop:"1px solid #F8FAFC"}}>
+                    <span style={{fontSize:12.5,color:"#374151"}}>{it.catalogoNome}</span>
+                    {!filialId&&<span style={{...badgeStyle,color:"#6B7280",background:"#F1F5F9"}}>{it.filialNome}</span>}
+                  </div>
+                ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DashboardView({profile,filiais}){
   const isMobile=useIsMobile();
   const[stats,setStats]=useState(null);
   const[atingimento,setAtingimento]=useState(null);
-  const[checklistFaltando,setChecklistFaltando]=useState([]);
   const[loading,setLoading]=useState(true);
 
   useEffect(()=>{
@@ -1282,7 +1413,6 @@ function DashboardView({profile,filiais}){
 
       if(!cancelled){
         setAtingimento(ating);
-        setChecklistFaltando((checklist||[]).filter(c=>!c.catalogo_id));
       }
       setLoading(false);
     }
@@ -1348,25 +1478,7 @@ function DashboardView({profile,filiais}){
           </div>
         </div>
       )}
-      {profile.userType!=="colaborador"&&checklistFaltando.length>0&&(
-        <div style={{background:"#fff",border:"1px solid #F1F5F9",borderRadius:14,padding:"18px 20px",marginBottom:14}}>
-          <h2 style={{fontSize:15,fontWeight:800,color:"#111827",margin:"0 0 3px"}}>
-            Itens do checklist ainda não cadastrados ({checklistFaltando.length})
-          </h2>
-          <p style={{fontSize:11.5,color:"#9CA3AF",margin:"0 0 14px"}}>
-            Nenhuma filial tem essas ferramentas no sistema — assim que forem cadastradas com o
-            código correto, entram na contagem automaticamente.
-          </p>
-          <div style={{display:"flex",flexDirection:"column",gap:6}}>
-            {checklistFaltando.map(c=>(
-              <div key={c.id} style={{display:"flex",gap:10,alignItems:"baseline",padding:"6px 0",borderTop:"1px solid #F8FAFC"}}>
-                <span style={{fontSize:11,fontWeight:700,color:"#9CA3AF",minWidth:80,flexShrink:0}}>{c.codigo}</span>
-                <span style={{fontSize:12.5,color:"#374151"}}>{c.descricao}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      {profile.userType!=="colaborador"&&<ReconciliacaoChecklistPreciarioPanel profile={profile} filiais={filiais}/>}
       {profile.userType!=="colaborador"&&<UsoAoVivoPanel/>}
     </div>
   );
