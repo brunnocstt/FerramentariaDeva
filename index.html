@@ -1214,7 +1214,7 @@ function ReconciliacaoChecklistPreciarioPanel({profile,filiais}){
         supabase.from("checklist_especifer_itens").select("codigo,codigo_alternativo,descricao,catalogo_id").order("ordem"),
         supabase.from("ferramentas_unidade").select("filial_id,codigo,catalogo_id").eq("ativo",true).in("filial_id",filiaisIds),
         supabase.from("estoque_pool").select("filial_id,catalogo_id").in("filial_id",filiaisIds),
-        supabase.from("ferramentas_catalogo").select("id,codigo_interno"),
+        supabase.from("ferramentas_catalogo").select("id,nome,codigo_interno"),
       ]);
       if(cancelled)return;
 
@@ -1229,12 +1229,17 @@ function ReconciliacaoChecklistPreciarioPanel({profile,filiais}){
         :{data:[]};
       if(cancelled)return;
 
+      const nomePorCatalogo=new Map((catalogos||[]).map(c=>[c.id,c.nome||""]));
       const codigoInternoPorCatalogo=new Map((catalogos||[]).filter(c=>c.codigo_interno).map(c=>[c.id,c.codigo_interno]));
-      const codigosUnidadePorFilial=new Map(); // filial_id -> Set(codigo em upper)
+      const codigosUnidadePorFilial=new Map(); // filial_id -> Set(codigo em upper), pra igualdade exata (rápido)
+      const codigosUnidadeRawPorFilial=new Map(); // filial_id -> array de códigos crus, pra célula composta
       const catalogoIdsPorFilial=new Map(); // filial_id -> Set(catalogo_id)
       (unidades||[]).forEach(u=>{
+        const codUp=(u.codigo||"").toUpperCase();
         if(!codigosUnidadePorFilial.has(u.filial_id))codigosUnidadePorFilial.set(u.filial_id,new Set());
-        codigosUnidadePorFilial.get(u.filial_id).add((u.codigo||"").toUpperCase());
+        codigosUnidadePorFilial.get(u.filial_id).add(codUp);
+        if(!codigosUnidadeRawPorFilial.has(u.filial_id))codigosUnidadeRawPorFilial.set(u.filial_id,[]);
+        codigosUnidadeRawPorFilial.get(u.filial_id).push(codUp);
         if(!catalogoIdsPorFilial.has(u.filial_id))catalogoIdsPorFilial.set(u.filial_id,new Set());
         catalogoIdsPorFilial.get(u.filial_id).add(u.catalogo_id);
       });
@@ -1243,12 +1248,22 @@ function ReconciliacaoChecklistPreciarioPanel({profile,filiais}){
         catalogoIdsPorFilial.get(p.filial_id).add(p.catalogo_id);
       });
 
-      // Item está cadastrado numa filial se: o código (ou alternativo) bate com o código de
-      // alguma unidade daquela filial; OU o catálogo vinculado (via lista mestre) tem
-      // unidade/pool naquela filial; OU o código bate com o codigo_interno de algum catálogo
-      // que tem pool naquela filial. Mistura os três porque nenhum sozinho cobre tudo — código
-      // "sujo" (célula composta, código dentro da descrição) escapa dos três e fica invisível
-      // aqui mesmo, só dá pra achar conferindo o preciário na mão.
+      // Achar um código como substring inteira (não colada em outro número) dentro de um texto
+      // maior — pega célula composta do preciário ("99370007 USAR COM 99374344",
+      // "381000405 / 500056935") e código de fabricante citado no nome do catálogo
+      // ("Montagem Parafuso Tirante Da Manga (99388003)"), que igualdade exata não pega.
+      function contemCodigo(texto,codigoUp){
+        if(!texto||!codigoUp)return false;
+        const escaped=codigoUp.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
+        return new RegExp("(^|[^A-Z0-9])"+escaped+"($|[^A-Z0-9])").test(texto.toUpperCase());
+      }
+
+      // Item está cadastrado numa filial se: o código (ou alternativo) bate exato com o código
+      // de alguma unidade; OU aparece como substring dentro do código de alguma unidade (célula
+      // composta); OU o catálogo vinculado (via lista mestre) tem unidade/pool naquela filial;
+      // OU o código bate com o codigo_interno de algum catálogo em pool; OU o código aparece no
+      // NOME de algum catálogo com estoque naquela filial (código de fabricante citado na
+      // descrição/nome, não no campo código em si).
       function estaCadastrado(filialId,codigo,codigoAlt,catalogoId){
         const codigosUp=[codigo,codigoAlt].filter(Boolean).map(c=>c.toUpperCase());
         const codUnidade=codigosUnidadePorFilial.get(filialId)||new Set();
@@ -1258,6 +1273,12 @@ function ReconciliacaoChecklistPreciarioPanel({profile,filiais}){
         for(const cid of catIds){
           const interno=(codigoInternoPorCatalogo.get(cid)||"").toUpperCase();
           if(interno&&codigosUp.includes(interno))return true;
+        }
+        const rawUnidades=codigosUnidadeRawPorFilial.get(filialId)||[];
+        if(codigosUp.some(c=>rawUnidades.some(raw=>contemCodigo(raw,c))))return true;
+        for(const cid of catIds){
+          const nome=nomePorCatalogo.get(cid);
+          if(codigosUp.some(c=>contemCodigo(nome,c)))return true;
         }
         return false;
       }
