@@ -1349,7 +1349,7 @@ function ReconciliacaoChecklistPreciarioPanel({profile,filiais}){
         <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:20}}>
           <div>
             <div style={{fontSize:11.5,fontWeight:800,color:"#374151",textTransform:"uppercase",letterSpacing:.3,margin:"0 0 8px"}}>
-              Auditoria não achou, mas está no preciário ({naoEncontradaFiltrada.length})
+              Não presente no checklist especifer mas presente no preciário ({naoEncontradaFiltrada.length})
             </div>
             <div style={{maxHeight:420,overflowY:"auto"}}>
               {naoEncontradaFiltrada.length===0?
@@ -1365,7 +1365,7 @@ function ReconciliacaoChecklistPreciarioPanel({profile,filiais}){
           </div>
           <div>
             <div style={{fontSize:11.5,fontWeight:800,color:"#374151",textTransform:"uppercase",letterSpacing:.3,margin:"0 0 8px"}}>
-              Auditoria confirmou, mas falta no preciário ({semPreciarioFiltrado.length})
+              Presente no checklist especifer mas não presente no preciário ({semPreciarioFiltrado.length})
             </div>
             <div style={{maxHeight:420,overflowY:"auto"}}>
               {semPreciarioFiltrado.length===0?
