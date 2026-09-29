@@ -128,6 +128,13 @@ const supabase  = createClient(SUPA_URL, SUPA_ANON);
 /* ── CONSTANTES ─────────────────────────────────── */
 const BLUE="#1955FF";
 const MONTHS=["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
+// Total de itens avaliativos do checklist oficial Iveco/Especifer — precisa ser o MESMO número
+// pra todas as filiais num dado momento (é um programa único do fabricante, não varia por
+// frota/local). Só muda quando a Especifer atualiza o programa de verificação em si (ex.:
+// 251→254 quando o relatório de Betim de 18/09/2026 revelou 3 itens novos que o de Montes
+// Claros, de 09/09/2026, ainda não tinha) — quando isso acontecer de novo, atualizar aqui pra
+// TODAS as filiais de uma vez, mesmo as com auditoria antiga já registrada.
+const TOTAL_OBRIGATORIAS_ESPECIFER=254;
 
 /* ── RESPONSIVO ─────────────────────────────────── */
 // Layout "mobile" (menu no rodapé, cards em vez de tabela etc.): celular sempre, e tablet só
@@ -1257,23 +1264,20 @@ function DashboardView({profile,filiais}){
       // fisicamente no sistema ou não (isso é um problema de mapeamento interno nosso, não
       // motivo pra fingir que a ferramenta não existe). Só sem auditoria formal (outras
       // filiais) é que caímos de volta pro cálculo ao vivo (unidade/pool disponível agora).
-      // O total de itens avaliativos varia de relatório pra relatório (kits/combos entram ou
-      // saem conforme a frota atendida por cada filial) — cada auditoria traz o seu próprio
-      // total_avaliativos, não existe um número único válido pra todas; sem auditoria formal,
-      // usamos o tamanho da nossa lista mestre interna (checklist_especifer_itens) como base.
-      const{data:audits}=await supabase.from("checklist_especifer_auditorias").select("filial_id,inconformidades,total_avaliativos,data_conclusao")
+      // O total (TOTAL_OBRIGATORIAS_ESPECIFER) é sempre o mesmo pra qualquer filial — não varia
+      // por auditoria nem por frota; só sobe quando a Especifer atualiza o programa em si.
+      const{data:audits}=await supabase.from("checklist_especifer_auditorias").select("filial_id,inconformidades,data_conclusao")
         .in("filial_id",filiaisView.map(f=>f.id)).order("data_conclusao",{ascending:false});
       const auditoriaPorFilial=new Map();
       (audits||[]).forEach(a=>{if(!auditoriaPorFilial.has(a.filial_id))auditoriaPorFilial.set(a.filial_id,a);});
 
       const ating=filiaisView.map(f=>{
         const auditoria=auditoriaPorFilial.get(f.id);
-        const total=auditoria?auditoria.total_avaliativos:(checklist||[]).length;
         const disponiveis=auditoria
-          ? auditoria.total_avaliativos-auditoria.inconformidades
+          ? TOTAL_OBRIGATORIAS_ESPECIFER-auditoria.inconformidades
           : (checklist||[]).filter(c=>c.catalogo_id&&(porFilial.get(f.id)||new Set()).has(c.catalogo_id)).length;
-        return{filialId:f.id,filialNome:f.nome,total,disponiveis,
-          pct:total?Math.round(disponiveis/total*100):null};
+        return{filialId:f.id,filialNome:f.nome,total:TOTAL_OBRIGATORIAS_ESPECIFER,disponiveis,
+          pct:Math.round(disponiveis/TOTAL_OBRIGATORIAS_ESPECIFER*100)};
       });
 
       if(!cancelled){
@@ -1321,10 +1325,10 @@ function DashboardView({profile,filiais}){
         <div style={{background:"#fff",border:"1px solid #F1F5F9",borderRadius:14,padding:"18px 20px",marginBottom:14}}>
           <h2 style={{fontSize:15,fontWeight:800,color:"#111827",margin:"0 0 3px"}}>Atingimento de Ferramentas Obrigatórias</h2>
           <p style={{fontSize:11.5,color:"#9CA3AF",margin:"0 0 14px"}}>
-            Contra os itens do checklist oficial Especifer/Iveco. Pra filial com auditoria oficial
-            feita, vale o total e o resultado fechado daquele relatório; sem auditoria, a base é a
-            nossa lista mestre interna e o número é o estoque disponível agora. Histórico completo
-            por filial na tela "Checklist Especifer".
+            Contra os {TOTAL_OBRIGATORIAS_ESPECIFER} itens do checklist oficial Especifer/Iveco (igual
+            pra todas as filiais). Pra filial com auditoria oficial feita, vale o resultado fechado
+            daquele relatório; sem auditoria, o número é o estoque disponível agora. Histórico
+            completo por filial na tela "Checklist Especifer".
           </p>
           <div style={{display:"flex",flexDirection:"column",gap:12}}>
             {atingimento.map(a=>{
@@ -1390,7 +1394,7 @@ function ChecklistEspeciferView({profile,filiais}){
 
   useEffect(()=>{
     let cancelled=false;
-    supabase.from("checklist_especifer_auditorias").select("filial_id,inconformidades,total_avaliativos,data_conclusao")
+    supabase.from("checklist_especifer_auditorias").select("filial_id,inconformidades,data_conclusao")
       .in("filial_id",filiaisView.map(f=>f.id)).order("data_conclusao",{ascending:false})
       .then(({data})=>{
         if(cancelled)return;
@@ -1471,7 +1475,7 @@ function ChecklistEspeciferView({profile,filiais}){
         </button>
         <h1 style={{fontSize:22,fontWeight:800,color:"#111827",margin:"0 0 4px"}}>{filialSelecionada.nome}</h1>
         <p style={{fontSize:13,color:"#6B7280",margin:"0 0 24px"}}>
-          Histórico de auditorias do checklist oficial Especifer/Iveco — o total de itens avaliativos é o do próprio relatório.
+          Histórico de auditorias do checklist oficial Especifer/Iveco — {TOTAL_OBRIGATORIAS_ESPECIFER} itens obrigatórios em cada relatório.
         </p>
         <ErrorBox>{erroPdf}</ErrorBox>
         {loadingHistorico?<div style={{padding:60,textAlign:"center"}}><Spinner size={20}/></div>:
@@ -1479,8 +1483,8 @@ function ChecklistEspeciferView({profile,filiais}){
         (
           <div style={{display:"flex",flexDirection:"column",gap:10}}>
             {historico.map(a=>{
-              const confirmadas=a.total_avaliativos-a.inconformidades;
-              const pct=Math.round(confirmadas/a.total_avaliativos*100);
+              const confirmadas=TOTAL_OBRIGATORIAS_ESPECIFER-a.inconformidades;
+              const pct=Math.round(confirmadas/TOTAL_OBRIGATORIAS_ESPECIFER*100);
               const cor=pct>=90?"#059669":pct>=70?"#D97706":"#B91C1C";
               const aberto=expandidos.has(a.id);
               const naoEncontradas=naoEncontradasPorAuditoria.get(a.id)||[];
@@ -1492,7 +1496,7 @@ function ChecklistEspeciferView({profile,filiais}){
                     <ChevronRight size={16} color="#9CA3AF" style={{flexShrink:0,transform:aberto?"rotate(90deg)":"none",transition:"transform .15s"}}/>
                     <div style={{minWidth:100,fontSize:13,fontWeight:700,color:"#111827"}}>{fmtDate(a.data_conclusao)}</div>
                     <div style={{flex:1,minWidth:120,fontSize:13,color:"#6B7280"}}>{a.relatorio_numero?`Relatório #${a.relatorio_numero}`:"—"}</div>
-                    <div style={{fontSize:12.5,fontWeight:700,color:cor}}>{confirmadas}/{a.total_avaliativos} · {pct}%</div>
+                    <div style={{fontSize:12.5,fontWeight:700,color:cor}}>{confirmadas}/{TOTAL_OBRIGATORIAS_ESPECIFER} · {pct}%</div>
                     {a.nota!=null&&<div style={{fontSize:12,color:"#9CA3AF"}}>nota {a.nota}</div>}
                   </button>
                   {aberto&&(
@@ -1563,8 +1567,8 @@ function ChecklistEspeciferView({profile,filiais}){
         <div style={{display:"flex",flexDirection:"column",gap:10}}>
           {filiaisView.map(f=>{
             const a=resumoPorFilial.get(f.id);
-            const confirmadas=a?a.total_avaliativos-a.inconformidades:null;
-            const pct=confirmadas!=null?Math.round(confirmadas/a.total_avaliativos*100):null;
+            const confirmadas=a?TOTAL_OBRIGATORIAS_ESPECIFER-a.inconformidades:null;
+            const pct=confirmadas!=null?Math.round(confirmadas/TOTAL_OBRIGATORIAS_ESPECIFER*100):null;
             const cor=pct===null?"#9CA3AF":pct>=90?"#059669":pct>=70?"#D97706":"#B91C1C";
             return(
               <button key={f.id} onClick={()=>setFilialSelecionada(f)} className="lift"
@@ -1577,7 +1581,7 @@ function ChecklistEspeciferView({profile,filiais}){
                   </div>
                 </div>
                 <div style={{display:"flex",alignItems:"center",gap:10}}>
-                  {pct!==null&&<span style={{fontSize:12.5,fontWeight:800,color:cor}}>{confirmadas}/{a.total_avaliativos} · {pct}%</span>}
+                  {pct!==null&&<span style={{fontSize:12.5,fontWeight:800,color:cor}}>{confirmadas}/{TOTAL_OBRIGATORIAS_ESPECIFER} · {pct}%</span>}
                   <ChevronRight size={16} color="#9CA3AF"/>
                 </div>
               </button>
