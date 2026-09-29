@@ -1180,78 +1180,129 @@ function UsoAoVivoPanel(){
   );
 }
 
-// Reconciliação entre a lista mestre do checklist oficial Especifer/Iveco e o que cada filial
-// tem de fato cadastrado (preciário). Dois sentidos, lado a lado: itens do checklist sem
-// nenhuma unidade/pool naquela filial (a auditoria pode ter confirmado a ferramenta na vistoria
-// física, mas o sistema não sabe disso até alguém cadastrar), e catálogos com estoque naquela
-// filial que não correspondem a nenhum item do checklist (ferramenta de bancada comum, fora do
-// escopo da auditoria — não é um problema, só contexto). Sem filtro de filial, cada linha mostra
-// de qual filial se trata; um item do checklist nunca vinculado a NENHUM catálogo (em filial
-// nenhuma) aparece uma vez só, marcado "Nenhuma filial", em vez de repetir pra cada uma.
+// Reconciliação entre o RESULTADO DA AUDITORIA oficial Especifer/Iveco mais recente de cada
+// filial e o que ela tem de fato cadastrado no preciário. Não é a lista mestre estática — é o
+// relatório físico em si: o auditor visitou a oficina e marcou cada item como encontrado ou não.
+// Dois sentidos, lado a lado:
+// - Auditoria marcou "não encontrada", mas está no preciário: o auditor não achou/reconheceu a
+//   ferramenta na vistoria, só que ela já está cadastrada no sistema — provável erro de mapeamento
+//   (nome de bancada diferente do nome técnico, código duplicado servindo dois itens do checklist
+//   etc.), não uma ferramenta perdida de verdade.
+// - Auditoria confirmou como encontrada, mas não está no preciário: o auditor viu a ferramenta
+//   fisicamente, mas ninguém cadastrou ela no sistema (nem no preciário interno) — a planilha da
+//   filial ficou pra trás.
+// Só participam filiais que já têm auditoria oficial registrada (hoje: Betim e Montes Claros) —
+// sem uma auditoria concluída não tem "encontrada"/"não encontrada" pra comparar com nada.
 function ReconciliacaoChecklistPreciarioPanel({profile,filiais}){
   const isMobile=useIsMobile();
   const filiaisView=profile.userType==="admin_geral"?filiais:profile.filiaisAcesso;
   const filiaisKey=filiaisView.map(f=>f.id).join(",");
   const[filialId,setFilialId]=useState("");
   const[loading,setLoading]=useState(true);
-  const[semPreciario,setSemPreciario]=useState([]);
-  const[foraChecklist,setForaChecklist]=useState([]);
-  const[filiaisSemNada,setFiliaisSemNada]=useState([]);
+  const[naoEncontradaNoPreciario,setNaoEncontradaNoPreciario]=useState([]); // auditoria disse "não encontrada", mas está cadastrada
+  const[encontradaSemPreciario,setEncontradaSemPreciario]=useState([]); // auditoria confirmou, mas não está cadastrada
+  const[filiaisSemAuditoria,setFiliaisSemAuditoria]=useState([]);
 
   useEffect(()=>{
     let cancelled=false;
     async function load(){
       setLoading(true);
       const filiaisIds=filiaisView.map(f=>f.id);
-      const[{data:checklist},{data:catalogos},{data:unidades},{data:pools}]=await Promise.all([
-        supabase.from("checklist_especifer_itens").select("codigo,descricao,catalogo_id").order("ordem"),
-        supabase.from("ferramentas_catalogo").select("id,nome"),
-        supabase.from("ferramentas_unidade").select("filial_id,catalogo_id").eq("ativo",true).in("filial_id",filiaisIds),
+      const[{data:auditorias},{data:checklist},{data:unidades},{data:pools},{data:catalogos}]=await Promise.all([
+        supabase.from("checklist_especifer_auditorias").select("id,filial_id,data_conclusao")
+          .in("filial_id",filiaisIds).order("data_conclusao",{ascending:false}),
+        supabase.from("checklist_especifer_itens").select("codigo,codigo_alternativo,descricao,catalogo_id").order("ordem"),
+        supabase.from("ferramentas_unidade").select("filial_id,codigo,catalogo_id").eq("ativo",true).in("filial_id",filiaisIds),
         supabase.from("estoque_pool").select("filial_id,catalogo_id").in("filial_id",filiaisIds),
+        supabase.from("ferramentas_catalogo").select("id,codigo_interno"),
       ]);
       if(cancelled)return;
-      const nomeCatalogo=new Map((catalogos||[]).map(c=>[c.id,c.nome]));
-      const nomeFilial=new Map(filiaisView.map(f=>[f.id,f.nome]));
-      const stockPorFilial=new Map(); // filial_id -> Set(catalogo_id)
-      [...(unidades||[]),...(pools||[])].forEach(r=>{
-        if(!stockPorFilial.has(r.filial_id))stockPorFilial.set(r.filial_id,new Set());
-        stockPorFilial.get(r.filial_id).add(r.catalogo_id);
-      });
-      const catalogoIdsChecklist=new Set((checklist||[]).filter(c=>c.catalogo_id).map(c=>c.catalogo_id));
-      // Filial sem NADA cadastrado ainda (nem preciário, nem checklist) não entra no
-      // comparativo item a item — marcaria as ~246 ferramentas do checklist como "faltando"
-      // pra ela, o que não é sinal nenhum, é só "essa filial nunca começou". Só participam as
-      // que já têm pelo menos alguma unidade/pool.
-      const filiaisComEstoque=filiaisView.filter(f=>stockPorFilial.has(f.id));
-      const filiaisSemNada=filiaisView.filter(f=>!stockPorFilial.has(f.id));
 
-      const esquerda=[];
-      (checklist||[]).forEach(c=>{
-        if(!c.catalogo_id){
-          esquerda.push({key:"n-"+c.codigo,codigo:c.codigo,descricao:c.descricao,filialId:null,filialNome:"Nenhuma filial"});
-          return;
+      const auditoriaPorFilial=new Map(); // filial_id -> auditoria mais recente
+      (auditorias||[]).forEach(a=>{if(!auditoriaPorFilial.has(a.filial_id))auditoriaPorFilial.set(a.filial_id,a);});
+      const filiaisComAuditoria=filiaisView.filter(f=>auditoriaPorFilial.has(f.id));
+      const filiaisSemAud=filiaisView.filter(f=>!auditoriaPorFilial.has(f.id));
+
+      const auditoriaIds=[...auditoriaPorFilial.values()].map(a=>a.id);
+      const{data:itensNaoEncontrados}=auditoriaIds.length
+        ?await supabase.from("checklist_especifer_auditoria_itens").select("auditoria_id,codigo,descricao").in("auditoria_id",auditoriaIds)
+        :{data:[]};
+      if(cancelled)return;
+
+      const codigoInternoPorCatalogo=new Map((catalogos||[]).filter(c=>c.codigo_interno).map(c=>[c.id,c.codigo_interno]));
+      const codigosUnidadePorFilial=new Map(); // filial_id -> Set(codigo em upper)
+      const catalogoIdsPorFilial=new Map(); // filial_id -> Set(catalogo_id)
+      (unidades||[]).forEach(u=>{
+        if(!codigosUnidadePorFilial.has(u.filial_id))codigosUnidadePorFilial.set(u.filial_id,new Set());
+        codigosUnidadePorFilial.get(u.filial_id).add((u.codigo||"").toUpperCase());
+        if(!catalogoIdsPorFilial.has(u.filial_id))catalogoIdsPorFilial.set(u.filial_id,new Set());
+        catalogoIdsPorFilial.get(u.filial_id).add(u.catalogo_id);
+      });
+      (pools||[]).forEach(p=>{
+        if(!catalogoIdsPorFilial.has(p.filial_id))catalogoIdsPorFilial.set(p.filial_id,new Set());
+        catalogoIdsPorFilial.get(p.filial_id).add(p.catalogo_id);
+      });
+
+      // Item está cadastrado numa filial se: o código (ou alternativo) bate com o código de
+      // alguma unidade daquela filial; OU o catálogo vinculado (via lista mestre) tem
+      // unidade/pool naquela filial; OU o código bate com o codigo_interno de algum catálogo
+      // que tem pool naquela filial. Mistura os três porque nenhum sozinho cobre tudo — código
+      // "sujo" (célula composta, código dentro da descrição) escapa dos três e fica invisível
+      // aqui mesmo, só dá pra achar conferindo o preciário na mão.
+      function estaCadastrado(filialId,codigo,codigoAlt,catalogoId){
+        const codigosUp=[codigo,codigoAlt].filter(Boolean).map(c=>c.toUpperCase());
+        const codUnidade=codigosUnidadePorFilial.get(filialId)||new Set();
+        if(codigosUp.some(c=>codUnidade.has(c)))return true;
+        const catIds=catalogoIdsPorFilial.get(filialId)||new Set();
+        if(catalogoId&&catIds.has(catalogoId))return true;
+        for(const cid of catIds){
+          const interno=(codigoInternoPorCatalogo.get(cid)||"").toUpperCase();
+          if(interno&&codigosUp.includes(interno))return true;
         }
-        filiaisComEstoque.forEach(f=>{
-          if(!(stockPorFilial.get(f.id)||new Set()).has(c.catalogo_id)){
-            esquerda.push({key:c.codigo+"-"+f.id,codigo:c.codigo,descricao:c.descricao,filialId:f.id,filialNome:f.nome});
-          }
-        });
+        return false;
+      }
+
+      const checklistPorCodigo=new Map();
+      (checklist||[]).forEach(c=>{checklistPorCodigo.set(c.codigo,c);if(c.codigo_alternativo)checklistPorCodigo.set(c.codigo_alternativo,c);});
+      const nomeFilial=new Map(filiaisView.map(f=>[f.id,f.nome]));
+      const filialDaAuditoria=new Map([...auditoriaPorFilial.entries()].map(([fId,a])=>[a.id,fId]));
+
+      // Painel 1: auditoria marcou "não encontrada", mas o código já está cadastrado.
+      const naoEncontrada=[];
+      (itensNaoEncontrados||[]).forEach(it=>{
+        const fId=filialDaAuditoria.get(it.auditoria_id);
+        if(!fId)return;
+        const master=checklistPorCodigo.get(it.codigo);
+        if(estaCadastrado(fId,it.codigo,master?.codigo_alternativo,master?.catalogo_id)){
+          naoEncontrada.push({key:it.auditoria_id+"-"+it.codigo,codigo:it.codigo,descricao:it.descricao,
+            filialId:fId,filialNome:nomeFilial.get(fId)});
+        }
       });
 
-      const direita=[];
-      stockPorFilial.forEach((catalogoIds,fId)=>{
-        catalogoIds.forEach(cid=>{
-          if(!catalogoIdsChecklist.has(cid)){
-            direita.push({key:cid+"-"+fId,catalogoNome:nomeCatalogo.get(cid)||"—",filialId:fId,filialNome:nomeFilial.get(fId)||"—"});
+      // Painel 2: item do checklist confirmado (não está entre os "não encontrados" daquela
+      // auditoria), mas sem nenhum registro no preciário da filial.
+      const naoEncontradosPorFilial=new Map(); // filial_id -> Set(codigo)
+      (itensNaoEncontrados||[]).forEach(it=>{
+        const fId=filialDaAuditoria.get(it.auditoria_id);
+        if(!fId)return;
+        if(!naoEncontradosPorFilial.has(fId))naoEncontradosPorFilial.set(fId,new Set());
+        naoEncontradosPorFilial.get(fId).add(it.codigo);
+      });
+      const semPreciario=[];
+      filiaisComAuditoria.forEach(f=>{
+        const naoEncSet=naoEncontradosPorFilial.get(f.id)||new Set();
+        (checklist||[]).forEach(c=>{
+          if(naoEncSet.has(c.codigo)||(c.codigo_alternativo&&naoEncSet.has(c.codigo_alternativo)))return; // já está no painel 1
+          if(!estaCadastrado(f.id,c.codigo,c.codigo_alternativo,c.catalogo_id)){
+            semPreciario.push({key:c.codigo+"-"+f.id,codigo:c.codigo,descricao:c.descricao,filialId:f.id,filialNome:f.nome});
           }
         });
       });
-      direita.sort((a,b)=>a.catalogoNome.localeCompare(b.catalogoNome,"pt-BR",{sensitivity:"base"}));
 
       if(!cancelled){
-        setSemPreciario(esquerda);
-        setForaChecklist(direita);
-        setFiliaisSemNada(filiaisSemNada);
+        setNaoEncontradaNoPreciario(naoEncontrada);
+        setEncontradaSemPreciario(semPreciario);
+        setFiliaisSemAuditoria(filiaisSemAud);
         setLoading(false);
       }
     }
@@ -1259,13 +1310,13 @@ function ReconciliacaoChecklistPreciarioPanel({profile,filiais}){
     return()=>{cancelled=true;};
   },[filiaisKey]);
 
-  const filialSelecionadaVazia=filialId&&filiaisSemNada.some(f=>f.id===filialId);
+  const filialSelecionadaSemAuditoria=filialId&&filiaisSemAuditoria.some(f=>f.id===filialId);
+  const naoEncontradaFiltrada=useMemo(()=>
+    filialId?naoEncontradaNoPreciario.filter(i=>i.filialId===filialId):naoEncontradaNoPreciario,
+  [naoEncontradaNoPreciario,filialId]);
   const semPreciarioFiltrado=useMemo(()=>
-    filialId?semPreciario.filter(i=>i.filialId===filialId||i.filialId===null):semPreciario,
-  [semPreciario,filialId]);
-  const foraChecklistFiltrado=useMemo(()=>
-    filialId?foraChecklist.filter(i=>i.filialId===filialId):foraChecklist,
-  [foraChecklist,filialId]);
+    filialId?encontradaSemPreciario.filter(i=>i.filialId===filialId):encontradaSemPreciario,
+  [encontradaSemPreciario,filialId]);
 
   const badgeStyle={fontSize:10.5,fontWeight:700,color:BLUE,background:"#EEF2FF",padding:"1px 8px",
     borderRadius:999,whiteSpace:"nowrap",flexShrink:0};
@@ -1280,30 +1331,30 @@ function ReconciliacaoChecklistPreciarioPanel({profile,filiais}){
         </select>
       </div>
       <p style={{fontSize:11.5,color:"#9CA3AF",margin:"0 0 10px"}}>
-        Compara a lista mestre do checklist oficial Especifer/Iveco com o que cada filial tem cadastrado no preciário.
+        Compara o resultado da última auditoria oficial Especifer/Iveco de cada filial com o que ela tem cadastrado no preciário.
       </p>
-      {!loading&&!filialId&&filiaisSemNada.length>0&&(
+      {!loading&&!filialId&&filiaisSemAuditoria.length>0&&(
         <p style={{fontSize:11.5,color:"#B45309",background:"#FFFBEB",border:"1px solid #FDE68A",
           borderRadius:8,padding:"7px 10px",margin:"0 0 14px"}}>
-          {filiaisSemNada.map(f=>f.nome).join(", ")} ainda não {filiaisSemNada.length>1?"têm":"tem"} nenhuma
-          ferramenta cadastrada — não entram no comparativo abaixo até ter pelo menos o preciário importado.
+          {filiaisSemAuditoria.map(f=>f.nome).join(", ")} ainda não {filiaisSemAuditoria.length>1?"têm":"tem"} auditoria
+          oficial registrada — não entram no comparativo abaixo.
         </p>
       )}
       {loading?<div style={{padding:40,textAlign:"center"}}><Spinner size={20}/></div>:
-      filialSelecionadaVazia?(
+      filialSelecionadaSemAuditoria?(
         <p style={{fontSize:12.5,color:"#9CA3AF",padding:"12px 0"}}>
-          Essa filial ainda não tem nenhuma ferramenta cadastrada (nem preciário, nem checklist) — não tem o que comparar ainda.
+          Essa filial ainda não tem auditoria oficial Especifer/Iveco registrada — sem relatório não tem o que comparar.
         </p>
       ):(
         <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:20}}>
           <div>
             <div style={{fontSize:11.5,fontWeight:800,color:"#374151",textTransform:"uppercase",letterSpacing:.3,margin:"0 0 8px"}}>
-              Checklist sem preciário ({semPreciarioFiltrado.length})
+              Auditoria não achou, mas está no preciário ({naoEncontradaFiltrada.length})
             </div>
             <div style={{maxHeight:420,overflowY:"auto"}}>
-              {semPreciarioFiltrado.length===0?
+              {naoEncontradaFiltrada.length===0?
                 <p style={{fontSize:12,color:"#9CA3AF",margin:"8px 0 0"}}>Nada pendente.</p>:
-                semPreciarioFiltrado.map(it=>(
+                naoEncontradaFiltrada.map(it=>(
                   <div key={it.key} style={{display:"flex",gap:8,alignItems:"baseline",flexWrap:"wrap",padding:"7px 0",borderTop:"1px solid #F8FAFC"}}>
                     <span style={{fontSize:11,fontWeight:700,color:"#9CA3AF",minWidth:78,flexShrink:0}}>{it.codigo}</span>
                     <span style={{fontSize:12.5,color:"#374151",flex:1,minWidth:140}}>{it.descricao}</span>
@@ -1314,14 +1365,15 @@ function ReconciliacaoChecklistPreciarioPanel({profile,filiais}){
           </div>
           <div>
             <div style={{fontSize:11.5,fontWeight:800,color:"#374151",textTransform:"uppercase",letterSpacing:.3,margin:"0 0 8px"}}>
-              Preciário fora do checklist ({foraChecklistFiltrado.length})
+              Auditoria confirmou, mas falta no preciário ({semPreciarioFiltrado.length})
             </div>
             <div style={{maxHeight:420,overflowY:"auto"}}>
-              {foraChecklistFiltrado.length===0?
-                <p style={{fontSize:12,color:"#9CA3AF",margin:"8px 0 0"}}>Nada fora do checklist.</p>:
-                foraChecklistFiltrado.map(it=>(
-                  <div key={it.key} style={{display:"flex",gap:8,alignItems:"baseline",justifyContent:"space-between",flexWrap:"wrap",padding:"7px 0",borderTop:"1px solid #F8FAFC"}}>
-                    <span style={{fontSize:12.5,color:"#374151"}}>{it.catalogoNome}</span>
+              {semPreciarioFiltrado.length===0?
+                <p style={{fontSize:12,color:"#9CA3AF",margin:"8px 0 0"}}>Nada pendente.</p>:
+                semPreciarioFiltrado.map(it=>(
+                  <div key={it.key} style={{display:"flex",gap:8,alignItems:"baseline",flexWrap:"wrap",padding:"7px 0",borderTop:"1px solid #F8FAFC"}}>
+                    <span style={{fontSize:11,fontWeight:700,color:"#9CA3AF",minWidth:78,flexShrink:0}}>{it.codigo}</span>
+                    <span style={{fontSize:12.5,color:"#374151",flex:1,minWidth:140}}>{it.descricao}</span>
                     {!filialId&&<span style={{...badgeStyle,color:"#6B7280",background:"#F1F5F9"}}>{it.filialNome}</span>}
                   </div>
                 ))}
