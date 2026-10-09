@@ -131,10 +131,10 @@ const MONTHS=["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov",
 // Total de itens avaliativos do checklist oficial Iveco/Especifer — precisa ser o MESMO número
 // pra todas as filiais num dado momento (é um programa único do fabricante, não varia por
 // frota/local). Só muda quando a Especifer atualiza o programa de verificação em si (ex.:
-// 251→254 quando o relatório de Betim de 18/09/2026 revelou 3 itens novos que o de Montes
-// Claros, de 09/09/2026, ainda não tinha) — quando isso acontecer de novo, atualizar aqui pra
-// TODAS as filiais de uma vez, mesmo as com auditoria antiga já registrada.
-const TOTAL_OBRIGATORIAS_ESPECIFER=254;
+// 251 em Montes Claros, 09/09/2026 → 254 em Betim, 18/09/2026 → 255 em Juiz de Fora,
+// 09/10/2026) — quando isso acontecer de novo, atualizar aqui pra TODAS as filiais de uma
+// vez, mesmo as com auditoria antiga já registrada.
+const TOTAL_OBRIGATORIAS_ESPECIFER=255;
 
 /* ── RESPONSIVO ─────────────────────────────────── */
 // Layout "mobile" (menu no rodapé, cards em vez de tabela etc.): celular sempre, e tablet só
@@ -1202,6 +1202,7 @@ function ReconciliacaoChecklistPreciarioPanel({profile,filiais}){
   const[naoEncontradaNoPreciario,setNaoEncontradaNoPreciario]=useState([]); // auditoria disse "não encontrada", mas está cadastrada
   const[encontradaSemPreciario,setEncontradaSemPreciario]=useState([]); // auditoria confirmou, mas não está cadastrada
   const[filiaisSemAuditoria,setFiliaisSemAuditoria]=useState([]);
+  const[filiaisSemPreciario,setFiliaisSemPreciario]=useState([]);
 
   useEffect(()=>{
     let cancelled=false;
@@ -1309,8 +1310,12 @@ function ReconciliacaoChecklistPreciarioPanel({profile,filiais}){
         if(!naoEncontradosPorFilial.has(fId))naoEncontradosPorFilial.set(fId,new Set());
         naoEncontradosPorFilial.get(fId).add(it.codigo);
       });
+      // Filial com auditoria mas sem NENHUM item no preciário (ainda não importaram a planilha)
+      // não entra: listaria todos os ~240 itens confirmados como "faltando", o que não é sinal,
+      // é só "o preciário dessa filial ainda não foi cadastrado".
+      const filiaisSemPrec=filiaisComAuditoria.filter(f=>!catalogoIdsPorFilial.has(f.id));
       const semPreciario=[];
-      filiaisComAuditoria.forEach(f=>{
+      filiaisComAuditoria.filter(f=>catalogoIdsPorFilial.has(f.id)).forEach(f=>{
         const naoEncSet=naoEncontradosPorFilial.get(f.id)||new Set();
         (checklist||[]).forEach(c=>{
           if(naoEncSet.has(c.codigo)||(c.codigo_alternativo&&naoEncSet.has(c.codigo_alternativo)))return; // já está no painel 1
@@ -1324,6 +1329,7 @@ function ReconciliacaoChecklistPreciarioPanel({profile,filiais}){
         setNaoEncontradaNoPreciario(naoEncontrada);
         setEncontradaSemPreciario(semPreciario);
         setFiliaisSemAuditoria(filiaisSemAud);
+        setFiliaisSemPreciario(filiaisSemPrec);
         setLoading(false);
       }
     }
@@ -1361,10 +1367,22 @@ function ReconciliacaoChecklistPreciarioPanel({profile,filiais}){
           oficial registrada — não entram no comparativo abaixo.
         </p>
       )}
+      {!loading&&!filialId&&filiaisSemPreciario.length>0&&(
+        <p style={{fontSize:11.5,color:"#B45309",background:"#FFFBEB",border:"1px solid #FDE68A",
+          borderRadius:8,padding:"7px 10px",margin:"0 0 14px"}}>
+          {filiaisSemPreciario.map(f=>f.nome).join(", ")} já {filiaisSemPreciario.length>1?"têm":"tem"} auditoria
+          oficial, mas ainda não {filiaisSemPreciario.length>1?"têm":"tem"} preciário cadastrado — não entra
+          {filiaisSemPreciario.length>1?"m":""} no comparativo abaixo até importar a planilha.
+        </p>
+      )}
       {loading?<div style={{padding:40,textAlign:"center"}}><Spinner size={20}/></div>:
       filialSelecionadaSemAuditoria?(
         <p style={{fontSize:12.5,color:"#9CA3AF",padding:"12px 0"}}>
           Essa filial ainda não tem auditoria oficial Especifer/Iveco registrada — sem relatório não tem o que comparar.
+        </p>
+      ):filialId&&filiaisSemPreciario.some(f=>f.id===filialId)?(
+        <p style={{fontSize:12.5,color:"#9CA3AF",padding:"12px 0"}}>
+          Essa filial já tem auditoria oficial, mas ainda não tem preciário cadastrado — não tem o que comparar até importar a planilha.
         </p>
       ):(
         <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:20}}>
